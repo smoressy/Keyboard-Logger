@@ -4,8 +4,8 @@ from collections import defaultdict
 from queue import Queue
 import tkinter as tk
 import customtkinter as ctk
-from pynput import mouse
 import keyboard
+
 try:
     import sounddevice as sd
     import numpy as np
@@ -13,23 +13,109 @@ except ImportError:
     sd = None
     np = None
 
+# ================================
+# NEW MOUSE TRACKING CODE (Logger)
+# ================================
+
+import mouse  # Ensure this module is installed: pip install mouse
+
+# Global dictionary to hold daily mouse data for graphs
+mouse_data = {}  # Format: {"YYYY-MM-DD": {"left": 0, "right": 0, "middle": 0, "scroll": 0, "distance": 0.0}}
+
+class MouseStats:
+    left_clicks = 0
+    right_clicks = 0
+    middle_clicks = 0
+    scroll_count = 0
+    total_distance = 0.0
+    last_position = None
+
+def update_mouse_data(event_type, value):
+    today = time.strftime("%Y-%m-%d")
+    if today not in mouse_data:
+        mouse_data[today] = {"left": 0, "right": 0, "middle": 0, "scroll": 0, "distance": 0.0}
+    if event_type == "left":
+        mouse_data[today]["left"] += value
+    elif event_type == "right":
+        mouse_data[today]["right"] += value
+    elif event_type == "middle":
+        mouse_data[today]["middle"] += value
+    elif event_type == "scroll":
+        mouse_data[today]["scroll"] += value
+    elif event_type == "distance":
+        mouse_data[today]["distance"] += value
+
+def handle_mouse_event(event):
+    from mouse import MoveEvent, ButtonEvent, WheelEvent
+    if isinstance(event, MoveEvent):
+        if MouseStats.last_position is not None:
+            dx = event.x - MouseStats.last_position[0]
+            dy = event.y - MouseStats.last_position[1]
+            dist = math.sqrt(dx*dx + dy*dy)
+            MouseStats.total_distance += dist
+            update_mouse_data("distance", dist)
+        MouseStats.last_position = (event.x, event.y)
+    elif isinstance(event, ButtonEvent):
+        if event.event_type in ('down', 'double'):
+            if event.button == 'left':
+                MouseStats.left_clicks += 1
+                update_mouse_data("left", 1)
+            elif event.button == 'right':
+                MouseStats.right_clicks += 1
+                update_mouse_data("right", 1)
+            elif event.button == 'middle':
+                MouseStats.middle_clicks += 1
+                update_mouse_data("middle", 1)
+    elif isinstance(event, WheelEvent):
+        delta_val = abs(event.delta)
+        MouseStats.scroll_count += delta_val
+        update_mouse_data("scroll", delta_val)
+    # The original logger emitted a signal; here we omit that for the tkinter UI.
+
+# Register the mouse hook (this now replaces the previous pynput-based listener)
+mouse.hook(handle_mouse_event)
+
+# ================================
+# End of NEW MOUSE TRACKING CODE
+# ================================
+
+# -------------------------------
+# HELPER FUNCTIONS
+# -------------------------------
+
+def seconds_to_hms(seconds):
+    seconds = int(seconds)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    return f"{h}h {m}m {s}s"
+
+# The missing update_activity() function:
+def update_activity():
+    global last_activity_time
+    last_activity_time = time.time()
+
+# -------------------------------
+# Cached font downloading functions and UI appearance settings
+# -------------------------------
 def safe_after(delay, func):
     try:
         if root.winfo_exists():
             root.after(delay, func)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"safe_after error: {e}..!")
 
 def get_cached_font(url, filename):
     temp_dir = tempfile.gettempdir()
     font_path = os.path.join(temp_dir, filename)
-    if os.path.exists(font_path):
-        try:
+    try:
+        if os.path.exists(font_path):
             with open(font_path, "rb") as f:
                 font_data = f.read()
+            print(f"cached font found: {filename}..!")
             return font_path, font_data
-        except Exception as e:
-            print(f"Error reading cached font {filename}: {e}")
+    except Exception as e:
+        print(f"error reading cached font {filename}: {e}..!")
     def download_font():
         nonlocal font_path
         try:
@@ -38,13 +124,14 @@ def get_cached_font(url, filename):
             font_data = response.content
             with open(font_path, "wb") as f:
                 f.write(font_data)
+            print(f"downloaded font {filename} successfully..!")
             if os.name == "nt":
                 FR_PRIVATE = 0x10
                 res = ctypes.windll.gdi32.AddFontResourceExW(font_path, FR_PRIVATE, 0)
                 if res == 0:
-                    print(f"Failed to load font resource for {filename}!")
+                    print(f"failed to load font resource for {filename}..!")
         except Exception as e:
-            print(f"Error fetching font {filename}: {e}")
+            print(f"error fetching font {filename}: {e}..!")
     threading.Thread(target=download_font, daemon=True).start()
     return font_path, None
 
@@ -54,14 +141,14 @@ if os.name == "nt" and poppins_path and os.path.exists(poppins_path):
     FR_PRIVATE = 0x10
     res = ctypes.windll.gdi32.AddFontResourceExW(poppins_path, FR_PRIVATE, 0)
     if res == 0:
-        print("Failed to load Poppins Bold font!")
+        print("failed to load Poppins Bold font..!")
 CUSTOM_FONT = ("Poppins", 16, "bold")
 FA_FONT_URL = "https://github.com/FortAwesome/Font-Awesome/raw/6.4.0/webfonts/fa-solid-900.ttf"
 fa_path, fa_data = get_cached_font(FA_FONT_URL, "fa-solid-900.ttf")
 if os.name == "nt" and fa_path and os.path.exists(fa_path):
     res = ctypes.windll.gdi32.AddFontResourceExW(fa_path, FR_PRIVATE, 0)
     if res == 0:
-        print("Failed to load Font Awesome font!")
+        print("failed to load Font Awesome font..!")
 FA_FONT = ("Font Awesome 6 Free Solid", 24)
 
 _dummy_root = tk.Tk()
@@ -74,6 +161,7 @@ root.configure(bg="#121212")
 root.state("zoomed")
 root.minsize(800, 600)
 
+# --- Global variables for keyboard tracking ---
 key_usage = {}
 key_press_duration = {}
 currently_pressed = {}
@@ -84,6 +172,9 @@ app_start_time = time.time()
 current_word = ""
 word_usage = defaultdict(int)
 word_daily_count = {}
+
+# Global variable to track activity
+last_activity_time = time.time()
 
 all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit",
                        "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k",
@@ -105,104 +196,26 @@ curse_general_set = all_curse_words_set - racial_slurs_set
 curse_general_count = 0
 racial_slurs_count = 0
 fastest_wpm = 0
-last_activity_time = time.time()
 screen_time_data = {}
 app_usage = {}
-mouse_left_clicks = 0
-mouse_right_clicks = 0
-mouse_middle_clicks = 0
-mouse_scroll_lines = 0
-mouse_data = {}
 
-from pynput.mouse import Listener as OriginalMouseListener
-class FixedMouseListener(OriginalMouseListener):
-    def _handler(self, code, msg, lpdata):
-        try:
-            converted = self._convert(code, msg, lpdata)
-        except NotImplementedError:
-            return
-        if converted is None:
-            return
-        try:
-            super(FixedMouseListener, self)._handle(code, msg, lpdata)
-        except Exception as e:
-            print("Error in _handle:", e)
-            
-class MouseTracker:
-    def __init__(self):
-        self.prev_pos = None
-        self.listener = FixedMouseListener(on_move=self.on_move,
-                                           on_click=self.on_click,
-                                           on_scroll=self.on_scroll)
-    def on_move(self, x, y):
-        update_activity()
-        current_pos = (x, y)
-        if self.prev_pos is not None:
-            dx = current_pos[0] - self.prev_pos[0]
-            dy = current_pos[1] - self.prev_pos[1]
-            distance = math.sqrt(dx*dx + dy*dy)
-            update_daily_mouse_data("distance", distance)
-        self.prev_pos = current_pos
-    def on_click(self, x, y, button, pressed):
-        update_activity()
-        if pressed:
-            if button == mouse.Button.left:
-                global mouse_left_clicks
-                mouse_left_clicks += 1
-                update_daily_mouse_data("left", 1)
-            elif button == mouse.Button.right:
-                global mouse_right_clicks
-                mouse_right_clicks += 1
-                update_daily_mouse_data("right", 1)
-            elif button == mouse.Button.middle:
-                global mouse_middle_clicks
-                mouse_middle_clicks += 1
-                update_daily_mouse_data("middle", 1)
-    def on_scroll(self, x, y, dx, dy):
-        update_activity()
-        amount = abs(dy)
-        global mouse_scroll_lines
-        mouse_scroll_lines += amount
-        update_daily_mouse_data("scroll", amount)
-    def start(self):
-        self.listener.start()
-
-def update_activity():
-    global last_activity_time
-    last_activity_time = time.time()
-
-def update_daily_mouse_data(field, value):
-    today = time.strftime("%Y-%m-%d")
-    if today not in mouse_data:
-        mouse_data[today] = {"left": 0, "right": 0, "middle": 0, "scroll": 0, "distance": 0.0}
-    mouse_data[today][field] += value
-
-def seconds_to_hms(seconds):
-    seconds = int(seconds)
-    h = seconds // 3600
-    m = (seconds % 3600) // 60
-    s = seconds % 60
-    return f"{h}h {m}m {s}s"
-
-mouse_tracker = MouseTracker()
-mouse_tracker.start()
-
+# --- UI, keyboard, and statistics code below ---
 content_frame = ctk.CTkFrame(root, fg_color="#121212", corner_radius=10)
 content_frame.pack(expand=True, fill="both", padx=10, pady=10)
-keyboard_frame   = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+keyboard_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 statistics_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
-settings_frame   = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
-recap_frame      = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
-screen_time_frame= ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
-mouse_frame      = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
-words_frame      = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+settings_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+recap_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+screen_time_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+mouse_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+words_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 current_screen = "Keyboard"
 performance_mode_active = False
 performance_mode_frame = None
 SLOW_HARDWARE = (os.cpu_count() is not None and os.cpu_count() < 4)
 KEY_COUNTS_INTERVAL = 1000 if SLOW_HARDWARE else 300
-STATS_INTERVAL      = 500  if SLOW_HARDWARE else 166
-CAPSLOCK_INTERVAL   = 500  if SLOW_HARDWARE else 100
+STATS_INTERVAL = 500 if SLOW_HARDWARE else 166
+CAPSLOCK_INTERVAL = 500 if SLOW_HARDWARE else 100
 maximized_fix_done = False
 
 def check_window_state():
@@ -216,8 +229,6 @@ check_window_state()
 
 def on_closing():
     keyboard.unhook_all()
-    if os.name == "nt" and globals().get("hook_id"):
-        ctypes.windll.user32.UnhookWindowsHookEx(hook_id)
     try:
         if root.winfo_exists():
             root.destroy()
@@ -262,7 +273,6 @@ def normalize_key(key):
         return key.upper()
     return key
 
-# Revised simulated key mapping: distinguish left and right shift (and ctrl/alt if needed)
 sim_key_mapping = {
     "ESC": "esc",
     "Backspace": "backspace",
@@ -381,14 +391,14 @@ class AestheticKey(ctk.CTkFrame):
             try:
                 keyboard.press(get_sim_key(self.norm_key))
             except Exception as e:
-                print(f"Error pressing {self.norm_key}: {e}")
+                print(f"error pressing {self.norm_key}: {e}..!")
         self.on_press(event)
     def release_handler(self, event):
         if self.norm_key != "Fn":
             try:
                 keyboard.release(get_sim_key(self.norm_key))
             except Exception as e:
-                print(f"Error releasing {self.norm_key}: {e}")
+                print(f"error releasing {self.norm_key}: {e}..!")
         on_key_release(type("DummyEvent", (), {"keysym": self.norm_key, "from_ui": True}))
         self.on_release(event)
 
@@ -742,13 +752,11 @@ middle_card, lbl_middle = create_stat_card(mouse_cards_container, "👆", "Middl
 scroll_card, lbl_scroll = create_stat_card(mouse_cards_container, "🌀", "Scrolls")
 distance_card, lbl_distance = create_stat_card(mouse_cards_container, "📏", "Distance Moved")
 def update_mouse_ui():
-    lbl_left.configure(text=str(mouse_left_clicks))
-    lbl_right.configure(text=str(mouse_right_clicks))
-    lbl_middle.configure(text=str(mouse_middle_clicks))
-    lbl_scroll.configure(text=str(mouse_scroll_lines))
-    today = time.strftime("%Y-%m-%d")
-    distance = int(mouse_data.get(today, {}).get("distance", 0))
-    lbl_distance.configure(text=f"{distance} px")
+    lbl_left.configure(text=str(MouseStats.left_clicks))
+    lbl_right.configure(text=str(MouseStats.right_clicks))
+    lbl_middle.configure(text=str(MouseStats.middle_clicks))
+    lbl_scroll.configure(text=str(MouseStats.scroll_count))
+    lbl_distance.configure(text=f"{int(MouseStats.total_distance)} px")
     safe_after(1000, update_mouse_ui)
 update_mouse_ui()
 mouse_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Clicks", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
@@ -1059,7 +1067,7 @@ for sk in special_keys:
         root.bind_all(f"<KeyPress-{sk}>", on_key_press)
         root.bind_all(f"<KeyRelease-{sk}>", on_key_release)
     except Exception as e:
-        print(f"Skipping binding for {sk}: {e}")
+        print(f"skipping binding for {sk}: {e}..!")
 root.bind_all("<KeyRelease-Shift_R>", on_key_release)
 def on_tab_press(event):
     on_key_press(event)
@@ -1110,8 +1118,7 @@ if os.name == "nt":
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
-    t = threading.Thread(target=pump_messages, daemon=True)
-    t.start()
+    threading.Thread(target=pump_messages, daemon=True).start()
 def get_capslock_state():
     if os.name == "nt":
         return bool(ctypes.windll.user32.GetKeyState(0x14) & 1)
@@ -1200,7 +1207,7 @@ def write_json(data):
         with open(DATA_FILE, "w") as f:
             json.dump(data, f)
     except Exception as e:
-        print("Error saving data.json:", e)
+        print(f"error saving data.json: {e}..!")
 
 def save_data():
     data = {
@@ -1212,10 +1219,11 @@ def save_data():
         "racial_slurs_count": racial_slurs_count,
         "app_start_time": app_start_time,
         "screen_time_data": screen_time_data,
-        "mouse_left_clicks": mouse_left_clicks,
-        "mouse_right_clicks": mouse_right_clicks,
-        "mouse_middle_clicks": mouse_middle_clicks,
-        "mouse_scroll_lines": mouse_scroll_lines,
+        "mouse_left_clicks": MouseStats.left_clicks,
+        "mouse_right_clicks": MouseStats.right_clicks,
+        "mouse_middle_clicks": MouseStats.middle_clicks,
+        "mouse_scroll_count": MouseStats.scroll_count,
+        "mouse_total_distance": MouseStats.total_distance,
         "mouse_data": mouse_data,
         "app_usage": app_usage,
         "fastest_wpm": fastest_wpm,
@@ -1229,7 +1237,7 @@ def periodic_data_update():
     safe_after(30000, periodic_data_update)
 
 def load_data():
-    global key_usage, total_key_count, word_usage, word_daily_count, curse_general_count, racial_slurs_count, app_start_time, screen_time_data, mouse_left_clicks, mouse_right_clicks, mouse_middle_clicks, mouse_scroll_lines, mouse_data, app_usage, fastest_wpm, current_word, key_press_duration
+    global key_usage, total_key_count, word_usage, word_daily_count, curse_general_count, racial_slurs_count, app_start_time, screen_time_data, mouse_data, app_usage, fastest_wpm, current_word, key_press_duration
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r") as f:
@@ -1242,17 +1250,18 @@ def load_data():
                 racial_slurs_count = data.get("racial_slurs_count", 0)
                 app_start_time = data.get("app_start_time", app_start_time)
                 screen_time_data = data.get("screen_time_data", {})
-                mouse_left_clicks = data.get("mouse_left_clicks", 0)
-                mouse_right_clicks = data.get("mouse_right_clicks", 0)
-                mouse_middle_clicks = data.get("mouse_middle_clicks", 0)
-                mouse_scroll_lines = data.get("mouse_scroll_lines", 0)
-                mouse_data = data.get("mouse_data", {})
+                mouse_data.update(data.get("mouse_data", {}))
+                MouseStats.left_clicks = data.get("mouse_left_clicks", 0)
+                MouseStats.right_clicks = data.get("mouse_right_clicks", 0)
+                MouseStats.middle_clicks = data.get("mouse_middle_clicks", 0)
+                MouseStats.scroll_count = data.get("mouse_scroll_count", 0)
+                MouseStats.total_distance = data.get("mouse_total_distance", 0.0)
                 app_usage = data.get("app_usage", {})
                 fastest_wpm = data.get("fastest_wpm", 0)
                 current_word = data.get("current_word", "")
                 key_press_duration.update(data.get("key_press_duration", {}))
         except Exception as e:
-            print("Error loading data.json:", e)
+            print(f"error loading data.json: {e}..!")
     else:
         save_data()
 load_data()
