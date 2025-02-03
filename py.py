@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal, random, subprocess
+import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal
 from collections import defaultdict
 from queue import Queue
 import tkinter as tk
@@ -21,9 +21,11 @@ try:
 except ImportError:
     Image = ImageDraw = ImageFilter = ImageEnhance = None
 import pystray
+
 mouse_data = {}
 mouse_click_positions = {"left": [], "right": [], "middle": []}
 mouse_movements = []
+
 class MouseStats:
     left_clicks = 0
     right_clicks = 0
@@ -31,6 +33,7 @@ class MouseStats:
     scroll_count = 0
     total_distance = 0.0
     last_position = None
+
 def update_mouse_data(event_type, value):
     today = time.strftime("%Y-%m-%d")
     if today not in mouse_data:
@@ -45,6 +48,7 @@ def update_mouse_data(event_type, value):
         mouse_data[today]["scroll"] += value
     elif event_type == "distance":
         mouse_data[today]["distance"] += value
+
 def handle_mouse_event(event):
     from mouse import MoveEvent, ButtonEvent, WheelEvent
     if isinstance(event, MoveEvent):
@@ -75,17 +79,22 @@ def handle_mouse_event(event):
         delta_val = abs(event.delta)
         MouseStats.scroll_count += delta_val
         update_mouse_data("scroll", delta_val)
+
 mouse.hook(handle_mouse_event)
+
 def seconds_to_hms(seconds):
     seconds = int(seconds)
     h = seconds // 3600
     m = (seconds % 3600) // 60
     s = seconds % 60
     return f"{h}h {m}m {s}s"
+
 def update_activity():
     global last_activity_time
     last_activity_time = time.time()
+
 app_running = True
+
 def safe_after(delay, func):
     def wrapper():
         try:
@@ -98,6 +107,7 @@ def safe_after(delay, func):
             root.after(delay, wrapper)
     except tk.TclError:
         pass
+
 def get_cached_font(url, filename):
     temp_dir = tempfile.gettempdir()
     font_path = os.path.join(temp_dir, filename)
@@ -127,6 +137,7 @@ def get_cached_font(url, filename):
             print(f"error fetching font {filename}: {e}..!")
     threading.Thread(target=download_font, daemon=True).start()
     return font_path, None
+
 POPPINS_FONT_URL = "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
 poppins_path, poppins_data = get_cached_font(POPPINS_FONT_URL, "Poppins-Bold.ttf")
 if os.name == "nt" and poppins_path and os.path.exists(poppins_path):
@@ -142,6 +153,7 @@ if os.name == "nt" and fa_path and os.path.exists(fa_path):
     if res == 0:
         print("failed to load Font Awesome font..!")
 FA_FONT = ("Font Awesome 6 Free Solid", 24)
+
 _dummy_root = tk.Tk()
 _dummy_root.withdraw()
 ctk.set_appearance_mode("Dark")
@@ -152,6 +164,7 @@ root.configure(bg="#121212")
 root.state("zoomed")
 root.minsize(800, 600)
 root.protocol("WM_DELETE_WINDOW", lambda: root.withdraw())
+
 key_usage = {}
 key_press_duration = {}
 currently_pressed = {}
@@ -162,7 +175,9 @@ app_start_time = time.time()
 current_word = ""
 word_usage = defaultdict(int)
 word_daily_count = {}
+
 last_activity_time = time.time()
+
 all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit", "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k", "shit", "shitty", "shitter", "shithole", "bullshit", "crap", "damn", "dammit", "goddamn", "goddammit", "s hit", "s.h.i.t", "s#it", "bitch", "bitches", "bitching", "bastard", "bastards", "asshole", "assholes", "ass", "arse", "arsehole", "b i t c h", "b*tch", "b!tch", "dick", "dickhead", "dumbass", "dickweed", "dickwad", "d i c k", "cunt", "cunts", "cock", "cocks", "clit", "clits", "cum", "cummer", "cumming", "pussy", "pussies", "c u n t", "c*nt", "c!nt", "whore", "whores", "slut", "sluts"}
 racial_slurs_set = {"adolf", "hitler", "jew", "nigger", "niggers", "fag", "faggot", "faggots", "kike", "kikes", "chink", "chinks", "spic", "spics", "wetback", "wetbacks", "gook", "gooks", "kkk", "k.k.k"}
 curse_general_set = all_curse_words_set - racial_slurs_set
@@ -171,6 +186,7 @@ racial_slurs_count = 0
 fastest_wpm = 0
 screen_time_data = {}
 app_usage = {}
+
 content_frame = ctk.CTkFrame(root, fg_color="#121212", corner_radius=10)
 content_frame.pack(expand=True, fill="both", padx=10, pady=10)
 keyboard_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
@@ -180,15 +196,15 @@ recap_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 screen_time_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 mouse_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 words_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
-screenshots_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 current_screen = "Keyboard"
 performance_mode_active = False
 performance_mode_frame = None
 SLOW_HARDWARE = (os.cpu_count() is not None and os.cpu_count() < 4)
-KEY_COUNTS_INTERVAL = 100
+KEY_COUNTS_INTERVAL = 1000 if SLOW_HARDWARE else 300
 STATS_INTERVAL = 500 if SLOW_HARDWARE else 166
 CAPSLOCK_INTERVAL = 500 if SLOW_HARDWARE else 100
 maximized_fix_done = False
+
 def check_window_state():
     global maximized_fix_done
     if not maximized_fix_done:
@@ -197,13 +213,16 @@ def check_window_state():
             maximized_fix_done = True
     safe_after(500, check_window_state)
 check_window_state()
+
 def on_closing():
     root.withdraw()
+
 def quit_app(icon, event):
     global app_running
     app_running = False
     icon.stop()
     os._exit(0)
+
 def normalize_key(key):
     if key is None:
         return None
@@ -217,9 +236,12 @@ def normalize_key(key):
     if len(key) == 1 and key.isalpha():
         return key.upper()
     return key
+
 sim_key_mapping = {"ESC": "esc", "Backspace": "backspace", "Enter": "enter", "Caps": "caps lock", "Shift": "shift", "Left Shift": "left shift", "Right Shift": "right shift", "CTRL": "ctrl", "Left Ctrl": "left ctrl", "Right Ctrl": "right ctrl", "Alt": "alt", "Left Alt": "left alt", "Right Alt": "right alt", "SPACE": "space", "Tab": "tab", "INSERT": "insert", "HOME": "home", "END": "end", "Delete": "delete", "PrtSc": "print screen", "Fn": "fn", "Win": "win", "↑": "up", "↓": "down", "←": "left", "→": "right"}
+
 def get_sim_key(key):
     return sim_key_mapping.get(key, key.lower() if len(key) == 1 else key.lower())
+
 class AestheticKey(ctk.CTkFrame):
     def __init__(self, master, text, width=60, height=60, norm_key=None, shadow_offset=4, **kwargs):
         super().__init__(master, width=width+shadow_offset, height=height+shadow_offset+20, fg_color="#121212", corner_radius=10, **kwargs)
@@ -316,11 +338,13 @@ class AestheticKey(ctk.CTkFrame):
                 print(f"error releasing {self.norm_key}: {e}..!")
         on_key_release(type("DummyEvent", (), {"keysym": self.norm_key, "from_ui": True}))
         self.on_release(event)
+
 def create_key(parent, key_label, width, height, norm_override=None):
     widget = AestheticKey(parent, text=key_label, width=width, height=height, norm_key=norm_override)
     if widget.norm_key is not None:
         keyboard_keys[widget.norm_key].append(widget)
     return widget
+
 main_keys_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 main_keys_frame.pack(pady=10)
 row_defs = [
@@ -341,6 +365,7 @@ for row in row_defs:
             key_label, key_w, key_h = item
             widget = create_key(row_frame, key_label, key_w, key_h)
         widget.pack(side="left", padx=4)
+        
 space_row_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 space_row_frame.pack(pady=10)
 space_keys = [("Fn", 60, 60), ("Ctrl", 60, 60, "Left Ctrl"), ("Win", 60, 60), ("Alt", 60, 60, "Left Alt"), ("Space", 300, 60), ("Alt", 60, 60, "Right Alt"), ("PrtSc", 60, 60), ("Ctrl", 60, 60, "Right Ctrl")]
@@ -352,6 +377,7 @@ for key_tuple in space_keys:
         key_label, key_w, key_h = key_tuple
         widget = create_key(space_row_frame, key_label, key_w, key_h)
     widget.grid(row=0, column=space_keys.index(key_tuple), padx=4, pady=4)
+    
 arrow_cluster_frame = ctk.CTkFrame(space_row_frame, width=60, height=60, fg_color="#121212", corner_radius=10)
 arrow_cluster_frame.grid(row=0, column=len(space_keys), padx=4, pady=4)
 up_key = create_key(arrow_cluster_frame, "↑", 30, 30)
@@ -362,12 +388,13 @@ down_key = create_key(arrow_cluster_frame, "↓", 30, 30)
 down_key.place(x=15, y=30)
 right_key = create_key(arrow_cluster_frame, "→", 30, 30)
 right_key.place(x=30, y=30)
+
 performance_mode_var = ctk.BooleanVar(value=False)
 def performance_mode_toggle():
     global performance_mode_active, performance_mode_frame
     if performance_mode_var.get():
         performance_mode_active = True
-        for frm in [keyboard_frame, statistics_frame, settings_frame, recap_frame, screen_time_frame, mouse_frame, words_frame, screenshots_frame]:
+        for frm in [keyboard_frame, statistics_frame, settings_frame, recap_frame, screen_time_frame, mouse_frame, words_frame]:
             frm.pack_forget()
         if performance_mode_frame is None:
             performance_mode_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
@@ -376,12 +403,13 @@ def performance_mode_toggle():
             title_label.pack(pady=(100,10))
             desc_label = ctk.CTkLabel(performance_mode_frame, text="Keyboard Logger is still tracking data in the background.\nOpen the app to view detailed stats.", font=("Poppins", 18), text_color="white", fg_color="transparent")
             desc_label.pack(pady=(0,20))
-            open_button = ctk.CTkButton(performance_mode_frame, text="Open", font=("Poppins", 20), fg_color="#1a1a1a", hover_color="#333333", command=performance_mode_disable)
+            open_button = ctk.CTkButton(performance_mode_frame, text="Open", font=("Poppins", 20), corner_radius=10, fg_color="#1a1a1a", hover_color="#333333", command=performance_mode_disable)
             open_button.pack(pady=20)
         else:
             performance_mode_frame.pack(expand=True, fill="both")
     else:
         performance_mode_disable()
+        
 def performance_mode_disable():
     global performance_mode_active, performance_mode_frame
     performance_mode_var.set(False)
@@ -402,13 +430,13 @@ def performance_mode_disable():
         mouse_frame.pack(expand=True, fill="both")
     elif current_screen == "Words":
         words_frame.pack(expand=True, fill="both")
-    elif current_screen == "Screenshots":
-        screenshots_frame.pack(expand=True, fill="both")
+
 key_press_duration_mode = ctk.BooleanVar(value=False)
 key_press_checkbox = ctk.CTkCheckBox(keyboard_frame, text="Key Presses", variable=key_press_duration_mode, font=("Poppins", 14), text_color="white", fg_color="#121212")
 key_press_checkbox.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 perf_checkbox = ctk.CTkCheckBox(keyboard_frame, text="Performance Mode", variable=performance_mode_var, font=("Poppins", 14), text_color="white", fg_color="#121212", command=performance_mode_toggle)
 perf_checkbox.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
+
 stats_option_var = ctk.StringVar(value="Line Graph")
 stats_option_menu = ctk.CTkOptionMenu(statistics_frame, values=["Line Graph", "Plain Text"], variable=stats_option_var, font=CUSTOM_FONT)
 stats_option_menu.pack(pady=10)
@@ -420,6 +448,7 @@ plain_text_box = ctk.CTkTextbox(stats_content_frame, font=("Poppins", 12, "bold"
 plain_text_box.pack(expand=True, fill="both")
 plain_text_box.configure(state="disabled")
 plain_text_box.pack_forget()
+
 def update_plain_text():
     plain_text_box.configure(state="normal")
     plain_text_box.delete("1.0", "end")
@@ -430,6 +459,7 @@ def update_plain_text():
         else:
             plain_text_box.insert("end", f"{k}: {key_usage.get(k, 0)}\n")
     plain_text_box.configure(state="disabled")
+
 def draw_line_graph():
     graph_canvas.delete("all")
     current_time = time.time()
@@ -478,6 +508,7 @@ def draw_line_graph():
     for point in smoothed_points:
         coords.extend(point)
     graph_canvas.create_line(*coords, fill="cyan", width=2, smooth=True)
+
 def update_statistics_display():
     option = stats_option_var.get()
     if option == "Line Graph":
@@ -490,6 +521,7 @@ def update_statistics_display():
         update_plain_text()
     safe_after(STATS_INTERVAL, update_statistics_display)
 update_statistics_display()
+
 def update_key_counts():
     show_duration = key_press_duration_mode.get()
     for key, widget_list in keyboard_keys.items():
@@ -503,6 +535,7 @@ def update_key_counts():
             widget.count_label.configure(text=display)
     safe_after(KEY_COUNTS_INTERVAL, update_key_counts)
 update_key_counts()
+
 def update_screen_time_loop():
     now = time.time()
     delta = now - update_screen_time_loop.last_check
@@ -532,6 +565,7 @@ def update_screen_time_loop():
     safe_after(refresh_rate, update_screen_time_loop)
 update_screen_time_loop.last_check = time.time()
 update_screen_time_loop()
+
 def update_screen_time_ui():
     today = time.strftime("%Y-%m-%d")
     data = screen_time_data.get(today, {"active": 0, "afk": 0})
@@ -552,6 +586,7 @@ def update_screen_time_ui():
     avg = total / count if count else 0
     lbl_avg.configure(text=seconds_to_hms(avg))
     safe_after(1000, update_screen_time_ui)
+    
 lbl_active = None
 lbl_app = None
 lbl_avg = None
@@ -571,10 +606,12 @@ def create_stat_card(parent, icon, title, value="Calculating..."):
     value_label.grid(row=1, column=1, sticky="w", pady=(0,20))
     card.columnconfigure(1, weight=1)
     return card, value_label
+
 active_card, lbl_active = create_stat_card(cards_container, "⏱", "Today's Active Time")
 app_card, lbl_app = create_stat_card(cards_container, "💻", "Most Used App Today")
 avg_card, lbl_avg = create_stat_card(cards_container, "📊", "Average Active Time (Past 7 Days)")
 update_screen_time_ui()
+
 weekly_graph_label = ctk.CTkLabel(screen_time_frame, text="Weekly Screen Time", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
 weekly_graph_label.pack(pady=(20,10))
 weekly_graph_frame = ctk.CTkFrame(screen_time_frame, fg_color="#121212", corner_radius=10)
@@ -612,6 +649,7 @@ def update_weekly_bars():
         weekly_canvas.create_text(x0 + bar_width / 2, y0 - 10, text=time_label, fill="white", font=("Poppins", 10))
     safe_after(1000, update_weekly_bars)
 update_weekly_bars()
+
 mouse_title = ctk.CTkLabel(mouse_frame, text="🖱 Mouse", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 mouse_title.pack(pady=(20,10))
 mouse_scroll_canvas = tk.Canvas(mouse_frame, bg="#121212", highlightthickness=0)
@@ -681,6 +719,7 @@ def update_mouse_line_graph():
         mouse_canvas.create_line(*coords, fill="cyan", width=2, smooth=True)
     safe_after(1000, update_mouse_line_graph)
 update_mouse_line_graph()
+
 distance_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Total Distance Moved", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
 distance_graph_label.pack(pady=(20,10))
 distance_graph_frame = ctk.CTkFrame(mouse_frame, fg_color="#121212", corner_radius=10)
@@ -717,6 +756,7 @@ def update_mouse_distance_graph():
         distance_canvas.create_text(x0 + bar_width / 2, y0 - 10, text=f"{int(distance)} px", fill="white", font=("Poppins", 10))
     safe_after(1000, update_mouse_distance_graph)
 update_mouse_distance_graph()
+
 def download_heatmap_data():
     if pyautogui is None or Image is None:
         print("Required libraries for heatmap (pyautogui and Pillow) are not installed.")
@@ -740,8 +780,10 @@ def download_heatmap_data():
         print(f"Heatmap saved to {filename}")
     except Exception as e:
         print(f"Error saving heatmap: {e}")
+
 download_heatmap_button = ctk.CTkButton(mouse_frame, text="Download Heatmap", font=("Poppins", 16), command=download_heatmap_data)
 download_heatmap_button.pack(pady=10)
+
 words_title = ctk.CTkLabel(words_frame, text="✏️ Words", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 words_title.pack(pady=(20,10))
 words_textbox = ctk.CTkTextbox(words_frame, font=("Poppins", 14, "bold"), fg_color="#121212", text_color="#FFFFFF", height=200)
@@ -799,12 +841,13 @@ def update_words_ui():
         words_canvas.create_text(200, 125, text="Graph requires 7 days of data", fill="white", font=("Poppins", 16, "bold"))
     safe_after(1000, update_words_ui)
 update_words_ui()
+
 def switch_screen(screen):
     global current_screen
     current_screen = screen
     if performance_mode_active:
         return
-    for frm in [keyboard_frame, statistics_frame, settings_frame, recap_frame, screen_time_frame, mouse_frame, words_frame, screenshots_frame]:
+    for frm in [keyboard_frame, statistics_frame, settings_frame, recap_frame, screen_time_frame, mouse_frame, words_frame]:
         frm.pack_forget()
     if screen == "Keyboard":
         keyboard_frame.pack(expand=True, fill="both")
@@ -820,8 +863,7 @@ def switch_screen(screen):
         mouse_frame.pack(expand=True, fill="both")
     elif screen == "Words":
         words_frame.pack(expand=True, fill="both")
-    elif screen == "Screenshots":
-        screenshots_frame.pack(expand=True, fill="both")
+
 sidebar_width = 300
 sidebar_height = 500
 sidebar_y = 10
@@ -844,8 +886,6 @@ btn_mouse = ctk.CTkButton(sidebar_panel, text="Mouse", command=lambda: [switch_s
 btn_mouse.pack(pady=12, padx=20, fill="x")
 btn_words = ctk.CTkButton(sidebar_panel, text="Words", command=lambda: [switch_screen("Words"), animate_sidebar_close()], **btn_params)
 btn_words.pack(pady=12, padx=20, fill="x")
-btn_screenshots = ctk.CTkButton(sidebar_panel, text="Screenshots", command=lambda: [switch_screen("Screenshots"), animate_sidebar_close()], **btn_params)
-btn_screenshots.pack(pady=12, padx=20, fill="x")
 def animate_sidebar_open():
     global sidebar_current_x
     target_x = 0
@@ -1216,121 +1256,18 @@ def change_appearance():
 appearance_mode_menu = ctk.CTkOptionMenu(settings_frame, values=["Dark", "Light", "System"], variable=appearance_mode_var, font=("Poppins", 16), command=lambda x: change_appearance())
 appearance_mode_menu.pack(pady=10)
 switch_screen("Keyboard")
-def round_corners(im, radius):
-    im = im.convert("RGBA")
-    circle = Image.new('L', (radius*2, radius*2), 0)
-    draw = ImageDraw.Draw(circle)
-    draw.ellipse((0, 0, radius*2, radius*2), fill=255)
-    alpha = Image.new('L', im.size, 255)
-    w, h = im.size
-    alpha.paste(circle.crop((0, 0, radius, radius)), (0, 0))
-    alpha.paste(circle.crop((0, radius, radius, radius*2)), (0, h - radius))
-    alpha.paste(circle.crop((radius, 0, radius*2, radius)), (w - radius, 0))
-    alpha.paste(circle.crop((radius, radius, radius*2, radius*2)), (w - radius, h - radius))
-    im.putalpha(alpha)
-    return im
-def take_screenshot():
-    if pyautogui is None:
-        return
-    screenshot = pyautogui.screenshot()
-    screenshot_dir = os.path.join(os.getcwd(), "screenshots")
-    if not os.path.exists(screenshot_dir):
-        os.makedirs(screenshot_dir)
-        if os.name == "nt":
-            try:
-                subprocess.check_call(["attrib", "+h", screenshot_dir])
-            except Exception:
-                pass
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = os.path.join(screenshot_dir, f"screenshot_{timestamp}.png")
-    try:
-        screenshot.save(filename)
-    except Exception as e:
-        print("Error saving screenshot:", e)
-def screenshot_scheduler():
-    while app_running:
-        now = datetime.datetime.now()
-        next_hour = (now.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=1))
-        random_minute = random.randint(1, 59)
-        scheduled_time = next_hour.replace(minute=random_minute)
-        if scheduled_time <= now:
-            scheduled_time += datetime.timedelta(hours=1)
-        wait_seconds = (scheduled_time - now).total_seconds()
-        time.sleep(wait_seconds)
-        take_screenshot()
-threading.Thread(target=screenshot_scheduler, daemon=True).start()
-take_screenshot_now_button = ctk.CTkButton(screenshots_frame, text="Take Screenshot Now", font=("Poppins", 16), command=take_screenshot)
-take_screenshot_now_button.pack(pady=10)
-screenshots_canvas = tk.Canvas(screenshots_frame, bg="#121212", highlightthickness=0)
-screenshots_canvas.pack(side="left", fill="both", expand=True)
-screenshots_scrollbar = ctk.CTkScrollbar(screenshots_frame, orientation="vertical", command=screenshots_canvas.yview)
-screenshots_scrollbar.pack(side="right", fill="y")
-screenshots_canvas.configure(yscrollcommand=screenshots_scrollbar.set)
-screenshots_inner_frame = ctk.CTkFrame(screenshots_canvas, fg_color="#121212", corner_radius=10)
-screenshots_canvas.create_window((0,0), window=screenshots_inner_frame, anchor="nw")
-def update_screenshots_scrollregion(event):
-    screenshots_canvas.configure(scrollregion=screenshots_canvas.bbox("all"))
-screenshots_inner_frame.bind("<Configure>", update_screenshots_scrollregion)
-def open_image_overlay(file):
-    overlay = tk.Toplevel(root)
-    overlay.attributes("-fullscreen", True)
-    overlay.attributes("-topmost", True)
-    overlay.configure(bg="black")
-    def close_overlay(event=None):
-        overlay.destroy()
-    overlay.bind("<Escape>", close_overlay)
-    overlay.bind("<Button-1>", close_overlay)
-    try:
-        img = Image.open(file)
-        screen_width = overlay.winfo_screenwidth()
-        screen_height = overlay.winfo_screenheight()
-        img.thumbnail((int(screen_width*0.8), int(screen_height*0.8)))
-        img = round_corners(img, 30)
-        photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
-        lbl = ctk.CTkLabel(overlay, image=photo, text="")
-        lbl.image = photo
-        lbl.place(relx=0.5, rely=0.5, anchor="center")
-        lbl.bind("<Button-1>", lambda e: None)
-    except Exception as e:
-        print("Error opening overlay:", e)
-def update_screenshots_ui():
-    for widget in screenshots_inner_frame.winfo_children():
-        widget.destroy()
-    screenshot_dir = os.path.join(os.getcwd(), "screenshots")
-    if not os.path.exists(screenshot_dir):
-        os.makedirs(screenshot_dir)
-    files = [os.path.join(screenshot_dir, f) for f in os.listdir(screenshot_dir) if f.lower().endswith(".png")]
-    files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-    screenshots_inner_frame.image_refs = []
-    for file in files:
-        try:
-            img = Image.open(file)
-            img.thumbnail((300, 200))
-            img = round_corners(img, 20)
-            photo = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
-            frame = ctk.CTkFrame(screenshots_inner_frame, fg_color="#1a1a1a", corner_radius=20)
-            frame.pack(pady=10, padx=10)
-            lbl = ctk.CTkLabel(frame, image=photo, text="")
-            lbl.image = photo
-            lbl.pack()
-            mod_time = os.path.getmtime(file)
-            date_str = datetime.datetime.fromtimestamp(mod_time).strftime("%Y-%m-%d %H:%M:%S")
-            date_label = ctk.CTkLabel(frame, text=date_str, font=("Poppins", 12), fg_color="#1a1a1a")
-            date_label.pack()
-            lbl.bind("<Button-1>", lambda e, file=file: open_image_overlay(file))
-            screenshots_inner_frame.image_refs.append(photo)
-        except Exception as e:
-            print("Error loading screenshot", file, e)
-    safe_after(60000, update_screenshots_ui)
-update_screenshots_ui()
-tray_menu = pystray.Menu(pystray.MenuItem("Quit", quit_app))
+def show_window(icon, event):
+    if app_running and root.winfo_exists():
+        root.deiconify()
+        root.state("zoomed")
 def create_image():
     width = 64
     height = 64
     image = Image.new("RGB", (width, height), "gray")
     return image
+tray_menu = pystray.Menu(pystray.MenuItem("Quit", quit_app))
 tray_icon = pystray.Icon("OptimizedKeyboardUI", create_image(), "Optimized Keyboard UI", tray_menu)
-tray_icon.on_clicked = lambda icon, event: (root.deiconify(), root.state("zoomed")) if app_running and root.winfo_exists() else None
+tray_icon.on_clicked = show_window
 threading.Thread(target=tray_icon.run, daemon=True).start()
 try:
     root.mainloop()
