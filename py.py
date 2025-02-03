@@ -20,6 +20,7 @@ try:
     from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
 except ImportError:
     Image = ImageDraw = ImageFilter = ImageEnhance = None
+import pystray
 
 mouse_data = {}
 mouse_click_positions = {"left": [], "right": [], "middle": []}
@@ -55,7 +56,7 @@ def handle_mouse_event(event):
         if MouseStats.last_position is not None:
             dx = event.x - MouseStats.last_position[0]
             dy = event.y - MouseStats.last_position[1]
-            dist = math.sqrt(dx*dx + dy*dy)
+            dist = math.sqrt(dx * dx + dy * dy)
             MouseStats.total_distance += dist
             update_mouse_data("distance", dist)
         MouseStats.last_position = (event.x, event.y)
@@ -92,14 +93,17 @@ def update_activity():
     global last_activity_time
     last_activity_time = time.time()
 
+app_running = True
+
 def safe_after(delay, func):
     def wrapper():
         try:
-            func()
+            if app_running and root.winfo_exists():
+                func()
         except tk.TclError:
             pass
     try:
-        if root.winfo_exists():
+        if app_running and root.winfo_exists():
             root.after(delay, wrapper)
     except tk.TclError:
         pass
@@ -159,6 +163,7 @@ root.title("Optimized Keyboard UI with Real-Time Updates")
 root.configure(bg="#121212")
 root.state("zoomed")
 root.minsize(800, 600)
+root.protocol("WM_DELETE_WINDOW", lambda: root.withdraw())
 
 key_usage = {}
 key_press_duration = {}
@@ -173,7 +178,7 @@ word_daily_count = {}
 
 last_activity_time = time.time()
 
-all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit", "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k", "shit", "shitty", "shitter", "shithole", "bullshit", "crap", "damn", "dammit", "goddamn", "goddammit", "s hit", "s.h.i.t", "s#it", "bitch", "bitches", "bitching", "bastard", "bastards", "asshole", "assholes", "ass", "arse", "arsehole", "b i t c h", "b*tch", "b!tch", "dick", "dickhead", "dumbass", "dickweed", "dickwad", "d i c k", "cunt", "cunts", "cock", "cocks", "clit", "clits", "cum", "cummer", "cumming", "pussy", "pussies", "c u n t", "c*nt", "c!nt", "whore", "whores", "slut", "sluts", "tramp", "trollop", "trollope", "son of a bitch", "son-of-a-bitch", "motherfucking", "fucking asshole", "f u c k e r", "s h i t", "b i t c h e s", "phuck", "phuk", "sh1t", "sh!t", "b!tches", "c0ck", "c0cks", "douche", "douchebag", "douchebags", "fuckoff", "fuck off", "f u c k off", "piss", "pissed", "pissing", "mf", "f u", "f u c"}
+all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit", "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k", "shit", "shitty", "shitter", "shithole", "bullshit", "crap", "damn", "dammit", "goddamn", "goddammit", "s hit", "s.h.i.t", "s#it", "bitch", "bitches", "bitching", "bastard", "bastards", "asshole", "assholes", "ass", "arse", "arsehole", "b i t c h", "b*tch", "b!tch", "dick", "dickhead", "dumbass", "dickweed", "dickwad", "d i c k", "cunt", "cunts", "cock", "cocks", "clit", "clits", "cum", "cummer", "cumming", "pussy", "pussies", "c u n t", "c*nt", "c!nt", "whore", "whores", "slut", "sluts"}
 racial_slurs_set = {"adolf", "hitler", "jew", "nigger", "niggers", "fag", "faggot", "faggots", "kike", "kikes", "chink", "chinks", "spic", "spics", "wetback", "wetbacks", "gook", "gooks", "kkk", "k.k.k"}
 curse_general_set = all_curse_words_set - racial_slurs_set
 curse_general_count = 0
@@ -210,17 +215,14 @@ def check_window_state():
 check_window_state()
 
 def on_closing():
-    keyboard.unhook_all()
-    try:
-        if root.winfo_exists():
-            root.destroy()
-    except Exception:
-        pass
-    sys.exit(0)
+    root.withdraw()
 
-def signal_handler(sig, frame):
-    on_closing()
-signal.signal(signal.SIGINT, signal_handler)
+def quit_app(icon, item):
+    global app_running
+    app_running = False
+    icon.stop()
+    root.destroy()
+    os._exit(0)
 
 def normalize_key(key):
     if key is None:
@@ -283,7 +285,7 @@ class AestheticKey(ctk.CTkFrame):
                 self._current_indicator_color = end_color
                 self.indicator_canvas.itemconfig(self.indicator, fill=end_color)
                 return
-            new_rgb = tuple(int(start_rgb[j] + (end_rgb[j]-start_rgb[j]) * i/steps) for j in range(3))
+            new_rgb = tuple(int(start_rgb[j] + (end_rgb[j] - start_rgb[j]) * i / steps) for j in range(3))
             new_hex = self._rgb_to_hex(new_rgb)
             self.indicator_canvas.itemconfig(self.indicator, fill=new_hex)
             safe_after(delay, lambda: step(i+1))
@@ -487,21 +489,21 @@ def draw_line_graph():
     height = graph_canvas.winfo_height()
     margin = 50
     def scale_x(t):
-        return margin + (t-t0)/(display_time-t0)*(width-2*margin)
+        return margin + (t - t0) / (display_time - t0) * (width - 2 * margin)
     def scale_y(r):
-        return height - margin - (r-rate_min)/(rate_max-rate_min)*(height-2*margin)
+        return height - margin - (r - rate_min) / (rate_max - rate_min) * (height - 2 * margin)
     grid_color = "#2a2a2a"
     for i in range(5):
-        y = margin + i*(height-2*margin)/4
-        graph_canvas.create_line(margin, y, width-margin, y, fill=grid_color)
-        value = rate_max - i*(rate_max-rate_min)/4
-        graph_canvas.create_text(margin-20, y, text=f"{value:.1f}", fill="white", font=("Poppins", 10))
+        y = margin + i * (height - 2 * margin) / 4
+        graph_canvas.create_line(margin, y, width - margin, y, fill=grid_color)
+        value = rate_max - i * (rate_max - rate_min) / 4
+        graph_canvas.create_text(margin - 20, y, text=f"{value:.1f}", fill="white", font=("Poppins", 10))
     for i in range(6):
-        x = margin + i*(width-2*margin)/5
-        graph_canvas.create_line(x, margin, x, height-margin, fill=grid_color)
-    graph_canvas.create_line(margin, margin, margin, height-margin, fill="white", width=2)
-    graph_canvas.create_line(margin, height-margin, width-margin, height-margin, fill="white", width=2)
-    graph_canvas.create_text(width/2, margin/2, text="Key Press Rate (per interval)", fill="white", font=("Poppins", 14, "bold"))
+        x = margin + i * (width - 2 * margin) / 5
+        graph_canvas.create_line(x, margin, x, height - margin, fill=grid_color)
+    graph_canvas.create_line(margin, margin, margin, height - margin, fill="white", width=2)
+    graph_canvas.create_line(margin, height - margin, width - margin, height - margin, fill="white", width=2)
+    graph_canvas.create_text(width / 2, margin / 2, text="Key Press Rate (per interval)", fill="white", font=("Poppins", 14, "bold"))
     smoothed_points = [(scale_x(t), scale_y(r)) for t, r in zip(times, smoothed_rates)]
     coords = []
     for point in smoothed_points:
@@ -578,7 +580,7 @@ def update_screen_time_ui():
     total = 0
     count = 0
     for i in range(7):
-        d = time.strftime("%Y-%m-%d", time.localtime(time.time() - i*86400))
+        d = time.strftime("%Y-%m-%d", time.localtime(time.time() - i * 86400))
         if d in screen_time_data:
             total += screen_time_data[d].get("active", 0)
             count += 1
@@ -586,6 +588,9 @@ def update_screen_time_ui():
     lbl_avg.configure(text=seconds_to_hms(avg))
     safe_after(1000, update_screen_time_ui)
     
+lbl_active = None
+lbl_app = None
+lbl_avg = None
 screen_time_title = ctk.CTkLabel(screen_time_frame, text="⏰ Screen Time", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 screen_time_title.pack(pady=(20, 10))
 cards_container = ctk.CTkFrame(screen_time_frame, fg_color="#1a1a1a", corner_radius=10)
@@ -597,9 +602,9 @@ def create_stat_card(parent, icon, title, value="Calculating..."):
     icon_label = ctk.CTkLabel(card, text=icon, font=("Poppins", 36), text_color="#FFD700", fg_color="#1a1a1a")
     icon_label.grid(row=0, column=0, rowspan=2, padx=20, pady=10)
     title_label = ctk.CTkLabel(card, text=title, font=("Poppins", 18, "bold"), text_color="white", fg_color="#1a1a1a")
-    title_label.grid(row=0, column=1, sticky="w", pady=(20,0))
+    title_label.grid(row=0, column=1, sticky="w", pady=(20, 0))
     value_label = ctk.CTkLabel(card, text=value, font=("Poppins", 16), text_color="white", fg_color="#1a1a1a")
-    value_label.grid(row=1, column=1, sticky="w", pady=(0,20))
+    value_label.grid(row=1, column=1, sticky="w", pady=(0, 20))
     card.columnconfigure(1, weight=1)
     return card, value_label
 
@@ -609,7 +614,7 @@ avg_card, lbl_avg = create_stat_card(cards_container, "📊", "Average Active Ti
 update_screen_time_ui()
 
 weekly_graph_label = ctk.CTkLabel(screen_time_frame, text="Weekly Screen Time", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
-weekly_graph_label.pack(pady=(20,10))
+weekly_graph_label.pack(pady=(20, 10))
 weekly_graph_frame = ctk.CTkFrame(screen_time_frame, fg_color="#121212", corner_radius=10)
 weekly_graph_frame.pack(pady=10, padx=20, fill="both")
 h_scroll = ctk.CTkScrollbar(weekly_graph_frame, orientation="horizontal")
@@ -631,24 +636,23 @@ def update_weekly_bars():
     gap = 20
     margin = 40
     max_bar_height = 150
-    total_width = margin*2 + (bar_width + gap)*len(day_data) - gap
+    total_width = margin * 2 + (bar_width + gap) * len(day_data) - gap
     weekly_canvas.configure(scrollregion=(0, 0, total_width, 250))
-    weekday_letter = {0: "M", 1: "T", 2: "W", 3: "T", 4: "F", 5: "S", 6: "S"}
     for idx, (day, active) in enumerate(day_data):
-        x0 = margin + idx*(bar_width+gap)
+        x0 = margin + idx * (bar_width + gap)
         bar_height = int((active / max_active) * max_bar_height)
         y0 = 200 - bar_height
         y1 = 200
-        weekly_canvas.create_rectangle(x0, y0, x0+bar_width, y1, fill="#4CAF50", outline="")
-        letter = weekday_letter.get(day.weekday(), day.strftime("%a")[0].upper())
-        weekly_canvas.create_text(x0 + bar_width/2, 210, text=letter, fill="white", font=("Poppins", 12))
+        weekly_canvas.create_rectangle(x0, y0, x0 + bar_width, y1, fill="#4CAF50", outline="")
+        weekday_full = day.strftime("%A")
+        weekly_canvas.create_text(x0 + bar_width / 2, 210, text=weekday_full, fill="white", font=("Poppins", 10))
         time_label = seconds_to_hms(active)
-        weekly_canvas.create_text(x0 + bar_width/2, y0 - 10, text=time_label, fill="white", font=("Poppins", 10))
+        weekly_canvas.create_text(x0 + bar_width / 2, y0 - 10, text=time_label, fill="white", font=("Poppins", 10))
     safe_after(1000, update_weekly_bars)
 update_weekly_bars()
 
 mouse_title = ctk.CTkLabel(mouse_frame, text="🖱 Mouse", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
-mouse_title.pack(pady=(20,10))
+mouse_title.pack(pady=(20, 10))
 mouse_scroll_canvas = tk.Canvas(mouse_frame, bg="#121212", highlightthickness=0)
 mouse_scroll_canvas.pack(side="left", fill="both", expand=True)
 mouse_v_scrollbar = ctk.CTkScrollbar(mouse_frame, orientation="vertical", command=mouse_scroll_canvas.yview)
@@ -676,7 +680,7 @@ def update_mouse_ui():
     safe_after(1000, update_mouse_ui)
 update_mouse_ui()
 mouse_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Clicks", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
-mouse_graph_label.pack(pady=(20,10))
+mouse_graph_label.pack(pady=(20, 10))
 mouse_graph_frame = ctk.CTkFrame(mouse_frame, fg_color="#121212", corner_radius=10)
 mouse_graph_frame.pack(pady=10, padx=20, fill="both")
 mouse_h_scroll = ctk.CTkScrollbar(mouse_graph_frame, orientation="horizontal", command=lambda *args: mouse_canvas.xview(*args))
@@ -699,12 +703,12 @@ def update_mouse_line_graph():
     gap = 20
     margin = 40
     max_graph_height = 150
-    total_width = margin*2 + (bar_width + gap)*len(day_clicks) - gap
+    total_width = margin * 2 + (bar_width + gap) * len(day_clicks) - gap
     mouse_canvas.configure(scrollregion=(0, 0, total_width, 250))
     points = []
     for idx, (day, clicks) in enumerate(day_clicks):
-        x = margin + idx*(bar_width+gap) + bar_width/2
-        y = 200 - (clicks/max_clicks) * max_graph_height
+        x = margin + idx * (bar_width + gap) + bar_width / 2
+        y = 200 - (clicks / max_clicks) * max_graph_height
         points.append((x, y))
         day_label = day.strftime("%a")
         mouse_canvas.create_text(x, 210, text=day_label, fill="white", font=("Poppins", 12))
@@ -717,6 +721,43 @@ def update_mouse_line_graph():
     safe_after(1000, update_mouse_line_graph)
 update_mouse_line_graph()
 
+distance_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Total Distance Moved", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
+distance_graph_label.pack(pady=(20, 10))
+distance_graph_frame = ctk.CTkFrame(mouse_frame, fg_color="#121212", corner_radius=10)
+distance_graph_frame.pack(pady=10, padx=20, fill="both")
+distance_h_scroll = ctk.CTkScrollbar(distance_graph_frame, orientation="horizontal")
+distance_h_scroll.pack(side="bottom", fill="x")
+distance_canvas = tk.Canvas(distance_graph_frame, bg="#121212", height=250, highlightthickness=0)
+distance_canvas.pack(side="top", fill="both", expand=True)
+distance_canvas.configure(xscrollcommand=distance_h_scroll.set)
+def update_mouse_distance_graph():
+    distance_canvas.delete("all")
+    today_date = datetime.date.today()
+    days = [today_date - datetime.timedelta(days=i) for i in range(6, -1, -1)]
+    day_distances = []
+    for day in days:
+        day_str = day.strftime("%Y-%m-%d")
+        distance = mouse_data.get(day_str, {}).get("distance", 0)
+        day_distances.append((day, distance))
+    max_distance = max([d for (_, d) in day_distances] + [1])
+    bar_width = 50
+    gap = 20
+    margin = 40
+    max_bar_height = 150
+    total_width = margin * 2 + (bar_width + gap) * len(day_distances) - gap
+    distance_canvas.configure(scrollregion=(0, 0, total_width, 250))
+    for idx, (day, distance) in enumerate(day_distances):
+        x0 = margin + idx * (bar_width + gap)
+        bar_height = int((distance / max_distance) * max_bar_height)
+        y0 = 200 - bar_height
+        y1 = 200
+        distance_canvas.create_rectangle(x0, y0, x0 + bar_width, y1, fill="#FFA07A", outline="")
+        weekday_full = day.strftime("%A")
+        distance_canvas.create_text(x0 + bar_width / 2, 210, text=weekday_full, fill="white", font=("Poppins", 10))
+        distance_canvas.create_text(x0 + bar_width / 2, y0 - 10, text=f"{int(distance)} px", fill="white", font=("Poppins", 10))
+    safe_after(1000, update_mouse_distance_graph)
+update_mouse_distance_graph()
+
 def download_heatmap_data():
     if pyautogui is None or Image is None:
         print("Required libraries for heatmap (pyautogui and Pillow) are not installed.")
@@ -724,12 +765,12 @@ def download_heatmap_data():
     screenshot = pyautogui.screenshot()
     screenshot = screenshot.convert("RGBA")
     width, height = screenshot.size
-    overlay = Image.new("RGBA", (width, height), (0,0,0,0))
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     all_clicks = mouse_click_positions["left"] + mouse_click_positions["right"] + mouse_click_positions["middle"]
     for (x, y) in all_clicks:
         radius = 20
-        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill=(255,0,0,80))
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(255, 0, 0, 80))
     overlay = overlay.filter(ImageFilter.GaussianBlur(radius=15))
     heatmap = Image.alpha_composite(screenshot, overlay)
     downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
@@ -745,12 +786,12 @@ download_heatmap_button = ctk.CTkButton(mouse_frame, text="Download Heatmap", fo
 download_heatmap_button.pack(pady=10)
 
 words_title = ctk.CTkLabel(words_frame, text="✏️ Words", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
-words_title.pack(pady=(20,10))
+words_title.pack(pady=(20, 10))
 words_textbox = ctk.CTkTextbox(words_frame, font=("Poppins", 14, "bold"), fg_color="#121212", text_color="#FFFFFF", height=200)
 words_textbox.pack(pady=10, padx=20, fill="x")
 words_textbox.configure(state="disabled")
 weekly_words_label = ctk.CTkLabel(words_frame, text="Weekly Word Count", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
-weekly_words_label.pack(pady=(20,10))
+weekly_words_label.pack(pady=(20, 10))
 weekly_words_frame = ctk.CTkFrame(words_frame, fg_color="#121212", corner_radius=10)
 weekly_words_frame.pack(pady=10, padx=20, fill="both")
 words_canvas = tk.Canvas(weekly_words_frame, bg="#121212", height=250, highlightthickness=0)
@@ -759,12 +800,17 @@ words_h_scroll = ctk.CTkScrollbar(weekly_words_frame, orientation="horizontal", 
 words_h_scroll.pack(side="bottom", fill="x")
 words_canvas.configure(xscrollcommand=words_h_scroll.set)
 def update_words_ui():
+    pos = words_textbox.yview()
     words_textbox.configure(state="normal")
     words_textbox.delete("1.0", "end")
     sorted_words = sorted(word_usage.items(), key=lambda kv: kv[1], reverse=True)[:25]
     for word, count in sorted_words:
         words_textbox.insert("end", f"{word}: {count}\n")
     words_textbox.configure(state="disabled")
+    try:
+        words_textbox.yview_moveto(pos[0])
+    except Exception:
+        pass
     today_date = datetime.date.today()
     last7days = [today_date - datetime.timedelta(days=i) for i in range(6, -1, -1)]
     day_labels = []
@@ -781,16 +827,16 @@ def update_words_ui():
         gap = 20
         margin = 40
         max_bar_height = 150
-        total_width = margin*2 + (bar_width + gap)*len(day_counts) - gap
+        total_width = margin * 2 + (bar_width + gap) * len(day_counts) - gap
         words_canvas.configure(scrollregion=(0, 0, total_width, 250))
         for idx, count in enumerate(day_counts):
-            x0 = margin + idx*(bar_width+gap)
+            x0 = margin + idx * (bar_width + gap)
             bar_height = int((count / max_count) * max_bar_height)
             y0 = 200 - bar_height
             y1 = 200
-            words_canvas.create_rectangle(x0, y0, x0+bar_width, y1, fill="#FFA500", outline="")
-            words_canvas.create_text(x0 + bar_width/2, y1 + 15, text=day_labels[idx], fill="white", font=("Poppins", 12))
-            words_canvas.create_text(x0 + bar_width/2, y0 - 10, text=str(count), fill="white", font=("Poppins", 10))
+            words_canvas.create_rectangle(x0, y0, x0 + bar_width, y1, fill="#FFA500", outline="")
+            words_canvas.create_text(x0 + bar_width / 2, y1 + 15, text=day_labels[idx], fill="white", font=("Poppins", 12))
+            words_canvas.create_text(x0 + bar_width / 2, y0 - 10, text=str(count), fill="white", font=("Poppins", 10))
     else:
         words_canvas.delete("all")
         words_canvas.create_text(200, 125, text="Graph requires 7 days of data", fill="white", font=("Poppins", 16, "bold"))
@@ -823,10 +869,10 @@ sidebar_width = 300
 sidebar_height = 500
 sidebar_y = 10
 sidebar_current_x = -sidebar_width
-sidebar_panel = ctk.CTkFrame(root, fg_color="#222222", width=sidebar_width, height=sidebar_height, corner_radius=20)
+sidebar_panel = ctk.CTkFrame(root, fg_color="#2E3B4E", width=sidebar_width, height=sidebar_height, corner_radius=20)
 sidebar_panel.place(x=sidebar_current_x, y=sidebar_y)
 btn_font = ("Poppins", 18, "bold")
-btn_params = {"font": btn_font, "fg_color": "#333333", "hover_color": "#555555", "corner_radius": 10}
+btn_params = {"font": btn_font, "fg_color": "#3E4A59", "hover_color": "#5A6775", "corner_radius": 10}
 btn_keyboard = ctk.CTkButton(sidebar_panel, text="Keyboard", command=lambda: [switch_screen("Keyboard"), animate_sidebar_close()], **btn_params)
 btn_keyboard.pack(pady=12, padx=20, fill="x")
 btn_statistics = ctk.CTkButton(sidebar_panel, text="Statistics", command=lambda: [switch_screen("Statistics"), animate_sidebar_close()], **btn_params)
@@ -841,7 +887,6 @@ btn_mouse = ctk.CTkButton(sidebar_panel, text="Mouse", command=lambda: [switch_s
 btn_mouse.pack(pady=12, padx=20, fill="x")
 btn_words = ctk.CTkButton(sidebar_panel, text="Words", command=lambda: [switch_screen("Words"), animate_sidebar_close()], **btn_params)
 btn_words.pack(pady=12, padx=20, fill="x")
-
 def animate_sidebar_open():
     global sidebar_current_x
     target_x = 0
@@ -852,7 +897,6 @@ def animate_sidebar_open():
         safe_after(10, animate_sidebar_open)
     else:
         sidebar_panel.place(x=target_x, y=sidebar_y)
-
 def animate_sidebar_close():
     global sidebar_current_x
     target_x = -sidebar_width
@@ -863,26 +907,21 @@ def animate_sidebar_close():
         safe_after(10, animate_sidebar_close)
     else:
         sidebar_panel.place(x=target_x, y=sidebar_y)
-
 def open_sidebar():
     animate_sidebar_open()
-
 def update_positions(event=None):
     if sidebar_panel.winfo_exists():
         sidebar_panel.place_configure(y=sidebar_y)
     hamburger_button.place_configure(x=10, y=10, anchor="nw")
 root.bind("<Configure>", update_positions)
-
 def hex_to_rgb(color):
     if not color.startswith("#"):
         r, g, b = root.winfo_rgb(color)
         color = "#%02x%02x%02x" % (r//256, g//256, b//256)
     color = color.lstrip("#")
     return tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
-
 def rgb_to_hex(rgb):
     return "#%02x%02x%02x" % rgb
-
 def animate_button_color(widget, start_color, end_color, steps=10, delay=30):
     start_rgb = hex_to_rgb(start_color)
     end_rgb = hex_to_rgb(end_color)
@@ -890,39 +929,32 @@ def animate_button_color(widget, start_color, end_color, steps=10, delay=30):
         if i > steps:
             widget.configure(fg_color=end_color)
             return
-        new_rgb = tuple(int(start_rgb[j] + (end_rgb[j]-start_rgb[j])*i/steps) for j in range(3))
+        new_rgb = tuple(int(start_rgb[j] + (end_rgb[j] - start_rgb[j]) * i / steps) for j in range(3))
         widget.configure(fg_color=rgb_to_hex(new_rgb))
         widget.after(delay, lambda: step(i+1))
     step(0)
-
 def animate_hamburger_hover_in(event):
     animate_button_color(hamburger_button, hamburger_button.cget("fg_color"), "#333333")
-
 def animate_hamburger_hover_out(event):
     animate_button_color(hamburger_button, hamburger_button.cget("fg_color"), root.cget("bg"))
-
 hamburger_button = ctk.CTkButton(root, text="\uf0c9", font=FA_FONT, width=40, height=40, fg_color=root.cget("bg"), hover_color=root.cget("bg"), corner_radius=20, command=open_sidebar, text_color="white")
 hamburger_button.place(x=10, y=10, anchor="nw")
 hamburger_button.bind("<Enter>", animate_hamburger_hover_in)
 hamburger_button.bind("<Leave>", animate_hamburger_hover_out)
-
 def on_ctrl_c(event):
     on_closing()
 root.bind("<Control-c>", on_ctrl_c)
-
 def release_all_keys():
     for key in list(currently_pressed.keys()):
         dummy = type("DummyEvent", (), {})()
         dummy.keysym = key
         dummy.from_hook = True
         on_key_release(dummy)
-
 def on_focus_in(event):
     global focus_lost_time
     focus_lost_time = None
     performance_mode_var.set(False)
     performance_mode_disable()
-
 def on_focus_out(event):
     global focus_lost_time
     focus_lost_time = time.time()
@@ -934,7 +966,6 @@ def on_focus_out(event):
     release_all_keys()
 root.bind("<FocusIn>", on_focus_in)
 root.bind("<FocusOut>", on_focus_out)
-
 key_event_queue = Queue()
 def process_key_events():
     while not key_event_queue.empty():
@@ -945,7 +976,6 @@ def process_key_events():
             on_key_release(event_obj)
     safe_after(10, process_key_events)
 process_key_events()
-
 def on_key_press(event):
     global total_key_count, current_word, curse_general_count, racial_slurs_count
     if not getattr(event, "keysym", None):
@@ -979,7 +1009,6 @@ def on_key_press(event):
             if (keyboard.is_pressed("alt") or keyboard.is_pressed("left alt") or keyboard.is_pressed("right alt")) and not any(k in currently_pressed for k in ["Alt", "Left Alt", "Right Alt"]):
                 on_key_press(type("DummyEvent", (), {"keysym": "Alt", "from_hook": True}))
         safe_after(50, check_alt_fallback)
-
 def on_key_release(event):
     if not getattr(event, "keysym", None):
         return
@@ -991,7 +1020,6 @@ def on_key_release(event):
     if key in keyboard_keys:
         for widget in keyboard_keys[key]:
             widget.on_release(event)
-
 def global_key_event(e):
     if not getattr(e, "name", None):
         return
@@ -1107,7 +1135,7 @@ def update_recap():
     avg_wpm = (total_key_count / 5) / elapsed_minutes if elapsed_minutes > 0 else 0
     now = time.time()
     keys_last_10 = sum(1 for ts in key_press_timestamps if now - ts <= 10)
-    current_wpm = (keys_last_10 / 5) / (10/60)
+    current_wpm = (keys_last_10 / 5) / (10 / 60)
     if current_wpm > fastest_wpm:
         fastest_wpm = current_wpm
     if key_usage:
@@ -1118,7 +1146,7 @@ def update_recap():
     avg_wpm_label.configure(text=f"Average WPM: {avg_wpm:.1f}")
     fastest_wpm_label.configure(text=f"Fastest WPM: {fastest_wpm:.1f}")
     most_used_label.configure(text=f"Most Used Key: {most_used_text}")
-    valid_words = {w: cnt for w, cnt in word_usage.items() if cnt >=20 and w.isalpha() and len(w) >= 3}
+    valid_words = {w: cnt for w, cnt in word_usage.items() if cnt >= 20 and w.isalpha() and len(w) >= 3}
     if valid_words:
         most_typed_word = max(valid_words, key=lambda k: valid_words[k])
         least_typed_word = min(valid_words, key=lambda k: valid_words[k])
@@ -1140,7 +1168,6 @@ def update_recap():
     racial_slurs_label.configure(text=f"Racial Slurs Typed: {racial_slurs_count}")
     safe_after(1000, update_recap)
 update_recap()
-
 DATA_FILE = os.path.join(os.getcwd(), "data_log.json")
 def write_json(data):
     try:
@@ -1221,7 +1248,33 @@ def load_data():
         save_data()
 load_data()
 periodic_data_update()
+settings_title = ctk.CTkLabel(settings_frame, text="Settings", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
+settings_title.pack(pady=(20, 10))
+appearance_mode_var = ctk.StringVar(value="Dark")
+def change_appearance():
+    mode = appearance_mode_var.get()
+    ctk.set_appearance_mode(mode)
+appearance_mode_menu = ctk.CTkOptionMenu(settings_frame, values=["Dark", "Light", "System"], variable=appearance_mode_var, font=("Poppins", 16), command=lambda x: change_appearance())
+appearance_mode_menu.pack(pady=10)
 switch_screen("Keyboard")
+def show_window(icon, item):
+    if app_running and root.winfo_exists():
+        root.deiconify()
+        root.state("zoomed")
+def create_image():
+    width = 64
+    height = 64
+    image = Image.new("RGB", (width, height), "gray")
+    return image
+tray_menu = pystray.Menu(
+    pystray.MenuItem("Show", show_window),
+    pystray.MenuItem("Quit", quit_app)
+)
+def tray_icon_thread():
+    icon_image = create_image()
+    tray_icon = pystray.Icon("OptimizedKeyboardUI", icon_image, "Optimized Keyboard UI", tray_menu)
+    tray_icon.run()
+threading.Thread(target=tray_icon_thread, daemon=True).start()
 try:
     root.mainloop()
 except KeyboardInterrupt:
