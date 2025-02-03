@@ -84,6 +84,7 @@ app_start_time = time.time()
 current_word = ""
 word_usage = defaultdict(int)
 word_daily_count = {}
+
 all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit",
                        "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k",
                        "shit", "shitty", "shitter", "shithole", "bullshit", "crap", "damn", "dammit",
@@ -233,13 +234,26 @@ def normalize_key(key):
         return None
     key = key.strip()
     kl = key.lower()
-    mapping = {"escape": "ESC", "esc": "ESC", "backspace": "Backspace", "return": "Enter", "enter": "Enter",
-               "caps_lock": "Caps", "caps lock": "Caps", "capslock": "Caps", "shift": "Shift", "shift_l": "Left Shift",
-               "shift_r": "Right Shift", "control": "CTRL", "ctrl": "CTRL", "control_l": "Left Ctrl", "control_r": "Right Ctrl",
-               "alt": "Alt", "alt_l": "Left Alt", "alt_r": "Right Alt", "space": "SPACE", "tab": "Tab", "insert": "INSERT",
-               "home": "HOME", "end": "END", "delete": "Delete", "print_screen": "PrtSc", "print screen": "PrtSc",
-               "prtsc": "PrtSc", "prt sc": "PrtSc", "prtscr": "PrtSc", "fn": "Fn", "windows": "Win", "win": "Win",
-               "super": "Win", "super_l": "Win", "super_r": "Win", "up": "↑", "down": "↓", "left": "←", "right": "→"}
+    mapping = {
+        "escape": "ESC", "esc": "ESC",
+        "backspace": "Backspace",
+        "return": "Enter", "enter": "Enter",
+        "caps_lock": "Caps", "caps lock": "Caps", "capslock": "Caps",
+        "shift": "Shift",
+        "shift_l": "Left Shift", "left shift": "Left Shift",
+        "shift_r": "Right Shift", "right shift": "Right Shift",
+        "control": "CTRL", "ctrl": "CTRL",
+        "control_l": "Left Ctrl", "control_r": "Right Ctrl",
+        "alt": "Alt", "alt_l": "Left Alt", "alt_r": "Right Alt",
+        "space": "SPACE", "tab": "Tab", "insert": "INSERT",
+        "home": "HOME", "end": "END", "delete": "Delete",
+        "print_screen": "PrtSc", "print screen": "PrtSc",
+        "prtsc": "PrtSc", "prt sc": "PrtSc", "prtscr": "PrtSc",
+        "fn": "Fn",
+        "windows": "Win", "win": "Win",
+        "super": "Win", "super_l": "Win", "super_r": "Win",
+        "up": "↑", "down": "↓", "left": "←", "right": "→"
+    }
     if kl in mapping:
         return mapping[kl]
     if kl.startswith("f") and kl[1:].isdigit():
@@ -248,12 +262,35 @@ def normalize_key(key):
         return key.upper()
     return key
 
-sim_key_mapping = {"ESC": "esc", "Backspace": "backspace", "Enter": "enter", "Caps": "caps lock",
-                   "Shift": "shift", "Left Shift": "shift", "Right Shift": "shift", "CTRL": "ctrl",
-                   "Left Ctrl": "ctrl", "Right Ctrl": "ctrl", "Alt": "alt", "Left Alt": "left alt",
-                   "Right Alt": "right alt", "SPACE": "space", "Tab": "tab", "INSERT": "insert",
-                   "HOME": "home", "END": "end", "Delete": "delete", "PrtSc": "print screen",
-                   "Fn": "fn", "Win": "win", "↑": "up", "↓": "down", "←": "left", "→": "right"}
+# Revised simulated key mapping: distinguish left and right shift (and ctrl/alt if needed)
+sim_key_mapping = {
+    "ESC": "esc",
+    "Backspace": "backspace",
+    "Enter": "enter",
+    "Caps": "caps lock",
+    "Shift": "shift",
+    "Left Shift": "left shift",
+    "Right Shift": "right shift",
+    "CTRL": "ctrl",
+    "Left Ctrl": "left ctrl",
+    "Right Ctrl": "right ctrl",
+    "Alt": "alt",
+    "Left Alt": "left alt",
+    "Right Alt": "right alt",
+    "SPACE": "space",
+    "Tab": "tab",
+    "INSERT": "insert",
+    "HOME": "home",
+    "END": "end",
+    "Delete": "delete",
+    "PrtSc": "print screen",
+    "Fn": "fn",
+    "Win": "win",
+    "↑": "up",
+    "↓": "down",
+    "←": "left",
+    "→": "right"
+}
 
 def get_sim_key(key):
     return sim_key_mapping.get(key, key.lower() if len(key) == 1 else key.lower())
@@ -285,7 +322,6 @@ class AestheticKey(ctk.CTkFrame):
         self.pressed = False
         self.current_offset = 0
     def _hex_to_rgb(self, color):
-        # If color is not in hex format, convert it using winfo_rgb.
         if not color.startswith("#"):
             r, g, b = root.winfo_rgb(color)
             color = "#%02x%02x%02x" % (r//256, g//256, b//256)
@@ -884,7 +920,6 @@ def update_positions(event=None):
 root.bind("<Configure>", update_positions)
 
 def hex_to_rgb(color):
-    # If color is not in hex format, convert it using winfo_rgb.
     if not color.startswith("#"):
         r, g, b = root.winfo_rgb(color)
         color = "#%02x%02x%02x" % (r//256, g//256, b//256)
@@ -912,7 +947,6 @@ def animate_hamburger_hover_in(event):
 def animate_hamburger_hover_out(event):
     animate_button_color(hamburger_button, hamburger_button.cget("fg_color"), root.cget("bg"))
 
-# Use the app's background color instead of "transparent"
 hamburger_button = ctk.CTkButton(root, text="\uf0c9", font=FA_FONT, width=40, height=40,
                                  fg_color=root.cget("bg"), hover_color=root.cget("bg"),
                                  corner_radius=20, command=open_sidebar, text_color="white")
@@ -932,13 +966,20 @@ def release_all_keys():
         on_key_release(dummy)
 
 def on_focus_in(event):
+    global focus_lost_time
+    focus_lost_time = None
     performance_mode_var.set(False)
     performance_mode_disable()
 
 def on_focus_out(event):
+    global focus_lost_time
+    focus_lost_time = time.time()
+    def check_focus_loss():
+        if focus_lost_time is not None and (time.time() - focus_lost_time) >= 60:
+            performance_mode_var.set(True)
+            performance_mode_toggle()
+    safe_after(60000, check_focus_loss)
     release_all_keys()
-    performance_mode_var.set(True)
-    performance_mode_toggle()
 root.bind("<FocusIn>", on_focus_in)
 root.bind("<FocusOut>", on_focus_out)
 
@@ -954,6 +995,7 @@ def process_key_events():
 process_key_events()
 
 def on_key_press(event):
+    global total_key_count, current_word, curse_general_count, racial_slurs_count
     if not getattr(event, "keysym", None):
         return
     update_activity()
@@ -961,7 +1003,6 @@ def on_key_press(event):
     if key in currently_pressed:
         return
     currently_pressed[key] = time.time()
-    global total_key_count
     total_key_count += 1
     key_usage[key] = key_usage.get(key, 0) + 1
     key_press_timestamps.append(time.time())
@@ -969,7 +1010,6 @@ def on_key_press(event):
         for widget in keyboard_keys[key]:
             widget.on_press(event)
     if len(key) == 1 and key.isalpha():
-        global current_word
         current_word += key.lower()
     if key in ["SPACE", "Enter"]:
         if current_word and len(current_word) >= 2:
