@@ -1,7 +1,7 @@
 # ⌨️ Keyboard & Mouse Activity Tracker (py.py)
 
 This is a **Python-based GUI application** that **tracks and visualizes** keyboard and mouse usage in real time. It logs **key presses, mouse clicks, screen time, and word usage** to provide insights into user activity. 
-<br><br>discord.gg/skipschool for updates/owner contact (@theylovesmores on discord)
+<br><br>https://discord.gg/skipschool for updates/owner contact (@theylovesmores on discord)
 ## 🚀 Features
 
 - **Keyboard Tracking**
