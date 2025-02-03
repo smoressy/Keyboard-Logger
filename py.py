@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal, sqlite3
+import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal
 from collections import defaultdict
 from queue import Queue
 import tkinter as tk
@@ -21,7 +21,6 @@ try:
 except ImportError:
     Image = ImageDraw = ImageFilter = ImageEnhance = None
 
-# --------------------- Global Variables and Data Structures ---------------------
 mouse_data = {}
 mouse_click_positions = {"left": [], "right": [], "middle": []}
 mouse_movements = []
@@ -93,25 +92,18 @@ def update_activity():
     global last_activity_time
     last_activity_time = time.time()
 
-# --------------------- Safe “after” helper and global running flag ---------------------
-app_running = True  # Global flag to prevent scheduling after app closure
-
 def safe_after(delay, func):
-    if not app_running:
-        return
     def wrapper():
         try:
-            if app_running:
-                func()
+            func()
         except tk.TclError:
             pass
     try:
-        if app_running and root.winfo_exists():
+        if root.winfo_exists():
             root.after(delay, wrapper)
     except tk.TclError:
         pass
 
-# --------------------- Font Caching and Download ---------------------
 def get_cached_font(url, filename):
     temp_dir = tempfile.gettempdir()
     font_path = os.path.join(temp_dir, filename)
@@ -158,7 +150,6 @@ if os.name == "nt" and fa_path and os.path.exists(fa_path):
         print("failed to load Font Awesome font..!")
 FA_FONT = ("Font Awesome 6 Free Solid", 24)
 
-# --------------------- Setup the Main Tkinter Window ---------------------
 _dummy_root = tk.Tk()
 _dummy_root.withdraw()
 ctk.set_appearance_mode("Dark")
@@ -169,7 +160,6 @@ root.configure(bg="#121212")
 root.state("zoomed")
 root.minsize(800, 600)
 
-# --------------------- Global Variables for Key/Word Stats ---------------------
 key_usage = {}
 key_press_duration = {}
 currently_pressed = {}
@@ -192,7 +182,6 @@ fastest_wpm = 0
 screen_time_data = {}
 app_usage = {}
 
-# --------------------- Build UI Frames ---------------------
 content_frame = ctk.CTkFrame(root, fg_color="#121212", corner_radius=10)
 content_frame.pack(expand=True, fill="both", padx=10, pady=10)
 keyboard_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
@@ -220,18 +209,11 @@ def check_window_state():
     safe_after(500, check_window_state)
 check_window_state()
 
-# --------------------- Clean Shutdown and Signal Handling ---------------------
 def on_closing():
-    global app_running
-    app_running = False
     keyboard.unhook_all()
     try:
         if root.winfo_exists():
             root.destroy()
-    except Exception:
-        pass
-    try:
-        db_conn.close()
     except Exception:
         pass
     sys.exit(0)
@@ -240,7 +222,6 @@ def signal_handler(sig, frame):
     on_closing()
 signal.signal(signal.SIGINT, signal_handler)
 
-# --------------------- Key Normalization and Mapping ---------------------
 def normalize_key(key):
     if key is None:
         return None
@@ -260,7 +241,6 @@ sim_key_mapping = {"ESC": "esc", "Backspace": "backspace", "Enter": "enter", "Ca
 def get_sim_key(key):
     return sim_key_mapping.get(key, key.lower() if len(key) == 1 else key.lower())
 
-# --------------------- AestheticKey and Keyboard Widgets ---------------------
 class AestheticKey(ctk.CTkFrame):
     def __init__(self, master, text, width=60, height=60, norm_key=None, shadow_offset=4, **kwargs):
         super().__init__(master, width=width+shadow_offset, height=height+shadow_offset+20, fg_color="#121212", corner_radius=10, **kwargs)
@@ -364,7 +344,6 @@ def create_key(parent, key_label, width, height, norm_override=None):
         keyboard_keys[widget.norm_key].append(widget)
     return widget
 
-# --------------------- Build the On-Screen Keyboard Layout ---------------------
 main_keys_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 main_keys_frame.pack(pady=10)
 row_defs = [
@@ -409,7 +388,6 @@ down_key.place(x=15, y=30)
 right_key = create_key(arrow_cluster_frame, "→", 30, 30)
 right_key.place(x=30, y=30)
 
-# --------------------- Performance Mode and Checkboxes ---------------------
 performance_mode_var = ctk.BooleanVar(value=False)
 def performance_mode_toggle():
     global performance_mode_active, performance_mode_frame
@@ -458,7 +436,6 @@ key_press_checkbox.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 perf_checkbox = ctk.CTkCheckBox(keyboard_frame, text="Performance Mode", variable=performance_mode_var, font=("Poppins", 14), text_color="white", fg_color="#121212", command=performance_mode_toggle)
 perf_checkbox.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
-# --------------------- Statistics (Graph/Text) UI ---------------------
 stats_option_var = ctk.StringVar(value="Line Graph")
 stats_option_menu = ctk.CTkOptionMenu(statistics_frame, values=["Line Graph", "Plain Text"], variable=stats_option_var, font=CUSTOM_FONT)
 stats_option_menu.pack(pady=10)
@@ -558,7 +535,6 @@ def update_key_counts():
     safe_after(KEY_COUNTS_INTERVAL, update_key_counts)
 update_key_counts()
 
-# --------------------- Screen Time Tracking ---------------------
 def update_screen_time_loop():
     now = time.time()
     delta = now - update_screen_time_loop.last_check
@@ -671,7 +647,6 @@ def update_weekly_bars():
     safe_after(1000, update_weekly_bars)
 update_weekly_bars()
 
-# --------------------- Mouse UI ---------------------
 mouse_title = ctk.CTkLabel(mouse_frame, text="🖱 Mouse", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 mouse_title.pack(pady=(20,10))
 mouse_scroll_canvas = tk.Canvas(mouse_frame, bg="#121212", highlightthickness=0)
@@ -769,7 +744,6 @@ def download_heatmap_data():
 download_heatmap_button = ctk.CTkButton(mouse_frame, text="Download Heatmap", font=("Poppins", 16), command=download_heatmap_data)
 download_heatmap_button.pack(pady=10)
 
-# --------------------- Words UI ---------------------
 words_title = ctk.CTkLabel(words_frame, text="✏️ Words", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 words_title.pack(pady=(20,10))
 words_textbox = ctk.CTkTextbox(words_frame, font=("Poppins", 14, "bold"), fg_color="#121212", text_color="#FFFFFF", height=200)
@@ -823,7 +797,6 @@ def update_words_ui():
     safe_after(1000, update_words_ui)
 update_words_ui()
 
-# --------------------- Screen Switching and Sidebar ---------------------
 def switch_screen(screen):
     global current_screen
     current_screen = screen
@@ -1168,17 +1141,24 @@ def update_recap():
     safe_after(1000, update_recap)
 update_recap()
 
-# --------------------- SQLite Persistence (instead of JSON file) ---------------------
-# Create (or open) a SQLite database file named "data"
-db_conn = sqlite3.connect("data", check_same_thread=False)
-db_cursor = db_conn.cursor()
-db_cursor.execute("""CREATE TABLE IF NOT EXISTS app_state (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp REAL,
-    state TEXT
-)""")
-db_conn.commit()
-
+DATA_FILE = os.path.join(os.getcwd(), "data_log.json")
+def write_json(data):
+    try:
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r") as f:
+                try:
+                    log = json.load(f)
+                    if not isinstance(log, list):
+                        log = []
+                except Exception:
+                    log = []
+        else:
+            log = []
+        log.append(data)
+        with open(DATA_FILE, "w") as f:
+            json.dump(log, f)
+    except Exception as e:
+        print(f"error saving data_log.json: {e}..!")
 def save_data():
     data = {
         "timestamp": time.time(),
@@ -1203,50 +1183,44 @@ def save_data():
         "current_word": current_word,
         "key_press_duration": key_press_duration
     }
-    state_str = json.dumps(data)
-    try:
-        db_cursor.execute("INSERT INTO app_state (timestamp, state) VALUES (?, ?)", (time.time(), state_str))
-        db_conn.commit()
-    except Exception as e:
-        print(f"Error saving state to SQLite: {e}")
-
+    threading.Thread(target=write_json, args=(data,), daemon=True).start()
 def periodic_data_update():
     save_data()
     safe_after(60000, periodic_data_update)
-periodic_data_update()
-
 def load_data():
     global key_usage, total_key_count, word_usage, word_daily_count, curse_general_count, racial_slurs_count, app_start_time, screen_time_data, mouse_data, mouse_click_positions, mouse_movements, app_usage, fastest_wpm, current_word, key_press_duration
-    try:
-        db_cursor.execute("SELECT state FROM app_state ORDER BY timestamp DESC LIMIT 1")
-        row = db_cursor.fetchone()
-        if row is not None:
-            state_str = row[0]
-            data = json.loads(state_str)
-            key_usage = data.get("key_usage", {})
-            total_key_count = data.get("total_key_count", 0)
-            word_usage.update(data.get("word_usage", {}))
-            word_daily_count = data.get("word_daily_count", {})
-            curse_general_count = data.get("curse_general_count", 0)
-            racial_slurs_count = data.get("racial_slurs_count", 0)
-            app_start_time = data.get("app_start_time", app_start_time)
-            screen_time_data = data.get("screen_time_data", {})
-            mouse_data.update(data.get("mouse_data", {}))
-            MouseStats.left_clicks = data.get("mouse_left_clicks", 0)
-            MouseStats.right_clicks = data.get("mouse_right_clicks", 0)
-            MouseStats.middle_clicks = data.get("mouse_middle_clicks", 0)
-            MouseStats.scroll_count = data.get("mouse_scroll_count", 0)
-            MouseStats.total_distance = data.get("mouse_total_distance", 0.0)
-            mouse_click_positions.update(data.get("mouse_click_positions", {}))
-            mouse_movements.extend(data.get("mouse_movements", []))
-            app_usage = data.get("app_usage", {})
-            fastest_wpm = data.get("fastest_wpm", 0)
-            current_word = data.get("current_word", "")
-            key_press_duration.update(data.get("key_press_duration", {}))
-    except Exception as e:
-        print(f"Error loading state from SQLite: {e}")
-
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r") as f:
+                log = json.load(f)
+                if isinstance(log, list) and log:
+                    data = log[-1]
+                    key_usage = data.get("key_usage", {})
+                    total_key_count = data.get("total_key_count", 0)
+                    word_usage.update(data.get("word_usage", {}))
+                    word_daily_count = data.get("word_daily_count", {})
+                    curse_general_count = data.get("curse_general_count", 0)
+                    racial_slurs_count = data.get("racial_slurs_count", 0)
+                    app_start_time = data.get("app_start_time", app_start_time)
+                    screen_time_data = data.get("screen_time_data", {})
+                    mouse_data.update(data.get("mouse_data", {}))
+                    MouseStats.left_clicks = data.get("mouse_left_clicks", 0)
+                    MouseStats.right_clicks = data.get("mouse_right_clicks", 0)
+                    MouseStats.middle_clicks = data.get("mouse_middle_clicks", 0)
+                    MouseStats.scroll_count = data.get("mouse_scroll_count", 0)
+                    MouseStats.total_distance = data.get("mouse_total_distance", 0.0)
+                    mouse_click_positions.update(data.get("mouse_click_positions", {}))
+                    mouse_movements.extend(data.get("mouse_movements", []))
+                    app_usage = data.get("app_usage", {})
+                    fastest_wpm = data.get("fastest_wpm", 0)
+                    current_word = data.get("current_word", "")
+                    key_press_duration.update(data.get("key_press_duration", {}))
+        except Exception as e:
+            print(f"error loading data_log.json: {e}..!")
+    else:
+        save_data()
 load_data()
+periodic_data_update()
 switch_screen("Keyboard")
 try:
     root.mainloop()
