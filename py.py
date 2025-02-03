@@ -56,7 +56,7 @@ def handle_mouse_event(event):
         if MouseStats.last_position is not None:
             dx = event.x - MouseStats.last_position[0]
             dy = event.y - MouseStats.last_position[1]
-            dist = math.sqrt(dx * dx + dy * dy)
+            dist = math.sqrt(dx*dx + dy*dy)
             MouseStats.total_distance += dist
             update_mouse_data("distance", dist)
         MouseStats.last_position = (event.x, event.y)
@@ -217,11 +217,10 @@ check_window_state()
 def on_closing():
     root.withdraw()
 
-def quit_app(icon, item):
+def quit_app(icon, event):
     global app_running
     app_running = False
     icon.stop()
-    root.destroy()
     os._exit(0)
 
 def normalize_key(key):
@@ -285,7 +284,7 @@ class AestheticKey(ctk.CTkFrame):
                 self._current_indicator_color = end_color
                 self.indicator_canvas.itemconfig(self.indicator, fill=end_color)
                 return
-            new_rgb = tuple(int(start_rgb[j] + (end_rgb[j] - start_rgb[j]) * i / steps) for j in range(3))
+            new_rgb = tuple(int(start_rgb[j] + (end_rgb[j]-start_rgb[j]) * i/steps) for j in range(3))
             new_hex = self._rgb_to_hex(new_rgb)
             self.indicator_canvas.itemconfig(self.indicator, fill=new_hex)
             safe_after(delay, lambda: step(i+1))
@@ -602,9 +601,9 @@ def create_stat_card(parent, icon, title, value="Calculating..."):
     icon_label = ctk.CTkLabel(card, text=icon, font=("Poppins", 36), text_color="#FFD700", fg_color="#1a1a1a")
     icon_label.grid(row=0, column=0, rowspan=2, padx=20, pady=10)
     title_label = ctk.CTkLabel(card, text=title, font=("Poppins", 18, "bold"), text_color="white", fg_color="#1a1a1a")
-    title_label.grid(row=0, column=1, sticky="w", pady=(20, 0))
+    title_label.grid(row=0, column=1, sticky="w", pady=(20,0))
     value_label = ctk.CTkLabel(card, text=value, font=("Poppins", 16), text_color="white", fg_color="#1a1a1a")
-    value_label.grid(row=1, column=1, sticky="w", pady=(0, 20))
+    value_label.grid(row=1, column=1, sticky="w", pady=(0,20))
     card.columnconfigure(1, weight=1)
     return card, value_label
 
@@ -614,7 +613,7 @@ avg_card, lbl_avg = create_stat_card(cards_container, "📊", "Average Active Ti
 update_screen_time_ui()
 
 weekly_graph_label = ctk.CTkLabel(screen_time_frame, text="Weekly Screen Time", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
-weekly_graph_label.pack(pady=(20, 10))
+weekly_graph_label.pack(pady=(20,10))
 weekly_graph_frame = ctk.CTkFrame(screen_time_frame, fg_color="#121212", corner_radius=10)
 weekly_graph_frame.pack(pady=10, padx=20, fill="both")
 h_scroll = ctk.CTkScrollbar(weekly_graph_frame, orientation="horizontal")
@@ -652,7 +651,7 @@ def update_weekly_bars():
 update_weekly_bars()
 
 mouse_title = ctk.CTkLabel(mouse_frame, text="🖱 Mouse", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
-mouse_title.pack(pady=(20, 10))
+mouse_title.pack(pady=(20,10))
 mouse_scroll_canvas = tk.Canvas(mouse_frame, bg="#121212", highlightthickness=0)
 mouse_scroll_canvas.pack(side="left", fill="both", expand=True)
 mouse_v_scrollbar = ctk.CTkScrollbar(mouse_frame, orientation="vertical", command=mouse_scroll_canvas.yview)
@@ -680,7 +679,7 @@ def update_mouse_ui():
     safe_after(1000, update_mouse_ui)
 update_mouse_ui()
 mouse_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Clicks", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
-mouse_graph_label.pack(pady=(20, 10))
+mouse_graph_label.pack(pady=(20,10))
 mouse_graph_frame = ctk.CTkFrame(mouse_frame, fg_color="#121212", corner_radius=10)
 mouse_graph_frame.pack(pady=10, padx=20, fill="both")
 mouse_h_scroll = ctk.CTkScrollbar(mouse_graph_frame, orientation="horizontal", command=lambda *args: mouse_canvas.xview(*args))
@@ -722,7 +721,7 @@ def update_mouse_line_graph():
 update_mouse_line_graph()
 
 distance_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Total Distance Moved", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
-distance_graph_label.pack(pady=(20, 10))
+distance_graph_label.pack(pady=(20,10))
 distance_graph_frame = ctk.CTkFrame(mouse_frame, fg_color="#121212", corner_radius=10)
 distance_graph_frame.pack(pady=10, padx=20, fill="both")
 distance_h_scroll = ctk.CTkScrollbar(distance_graph_frame, orientation="horizontal")
@@ -765,12 +764,12 @@ def download_heatmap_data():
     screenshot = pyautogui.screenshot()
     screenshot = screenshot.convert("RGBA")
     width, height = screenshot.size
-    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    overlay = Image.new("RGBA", (width, height), (0,0,0,0))
     draw = ImageDraw.Draw(overlay)
     all_clicks = mouse_click_positions["left"] + mouse_click_positions["right"] + mouse_click_positions["middle"]
     for (x, y) in all_clicks:
         radius = 20
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(255, 0, 0, 80))
+        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill=(255,0,0,80))
     overlay = overlay.filter(ImageFilter.GaussianBlur(radius=15))
     heatmap = Image.alpha_composite(screenshot, overlay)
     downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
@@ -786,12 +785,12 @@ download_heatmap_button = ctk.CTkButton(mouse_frame, text="Download Heatmap", fo
 download_heatmap_button.pack(pady=10)
 
 words_title = ctk.CTkLabel(words_frame, text="✏️ Words", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
-words_title.pack(pady=(20, 10))
+words_title.pack(pady=(20,10))
 words_textbox = ctk.CTkTextbox(words_frame, font=("Poppins", 14, "bold"), fg_color="#121212", text_color="#FFFFFF", height=200)
 words_textbox.pack(pady=10, padx=20, fill="x")
 words_textbox.configure(state="disabled")
 weekly_words_label = ctk.CTkLabel(words_frame, text="Weekly Word Count", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
-weekly_words_label.pack(pady=(20, 10))
+weekly_words_label.pack(pady=(20,10))
 weekly_words_frame = ctk.CTkFrame(words_frame, fg_color="#121212", corner_radius=10)
 weekly_words_frame.pack(pady=10, padx=20, fill="both")
 words_canvas = tk.Canvas(weekly_words_frame, bg="#121212", height=250, highlightthickness=0)
@@ -929,7 +928,7 @@ def animate_button_color(widget, start_color, end_color, steps=10, delay=30):
         if i > steps:
             widget.configure(fg_color=end_color)
             return
-        new_rgb = tuple(int(start_rgb[j] + (end_rgb[j] - start_rgb[j]) * i / steps) for j in range(3))
+        new_rgb = tuple(int(start_rgb[j] + (end_rgb[j]-start_rgb[j]) * i/steps) for j in range(3))
         widget.configure(fg_color=rgb_to_hex(new_rgb))
         widget.after(delay, lambda: step(i+1))
     step(0)
@@ -1135,7 +1134,7 @@ def update_recap():
     avg_wpm = (total_key_count / 5) / elapsed_minutes if elapsed_minutes > 0 else 0
     now = time.time()
     keys_last_10 = sum(1 for ts in key_press_timestamps if now - ts <= 10)
-    current_wpm = (keys_last_10 / 5) / (10 / 60)
+    current_wpm = (keys_last_10 / 5) / (10/60)
     if current_wpm > fastest_wpm:
         fastest_wpm = current_wpm
     if key_usage:
@@ -1146,7 +1145,7 @@ def update_recap():
     avg_wpm_label.configure(text=f"Average WPM: {avg_wpm:.1f}")
     fastest_wpm_label.configure(text=f"Fastest WPM: {fastest_wpm:.1f}")
     most_used_label.configure(text=f"Most Used Key: {most_used_text}")
-    valid_words = {w: cnt for w, cnt in word_usage.items() if cnt >= 20 and w.isalpha() and len(w) >= 3}
+    valid_words = {w: cnt for w, cnt in word_usage.items() if cnt >=20 and w.isalpha() and len(w) >= 3}
     if valid_words:
         most_typed_word = max(valid_words, key=lambda k: valid_words[k])
         least_typed_word = min(valid_words, key=lambda k: valid_words[k])
@@ -1249,7 +1248,7 @@ def load_data():
 load_data()
 periodic_data_update()
 settings_title = ctk.CTkLabel(settings_frame, text="Settings", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
-settings_title.pack(pady=(20, 10))
+settings_title.pack(pady=(20,10))
 appearance_mode_var = ctk.StringVar(value="Dark")
 def change_appearance():
     mode = appearance_mode_var.get()
@@ -1257,7 +1256,7 @@ def change_appearance():
 appearance_mode_menu = ctk.CTkOptionMenu(settings_frame, values=["Dark", "Light", "System"], variable=appearance_mode_var, font=("Poppins", 16), command=lambda x: change_appearance())
 appearance_mode_menu.pack(pady=10)
 switch_screen("Keyboard")
-def show_window(icon, item):
+def show_window(icon, event):
     if app_running and root.winfo_exists():
         root.deiconify()
         root.state("zoomed")
@@ -1266,15 +1265,10 @@ def create_image():
     height = 64
     image = Image.new("RGB", (width, height), "gray")
     return image
-tray_menu = pystray.Menu(
-    pystray.MenuItem("Show", show_window),
-    pystray.MenuItem("Quit", quit_app)
-)
-def tray_icon_thread():
-    icon_image = create_image()
-    tray_icon = pystray.Icon("OptimizedKeyboardUI", icon_image, "Optimized Keyboard UI", tray_menu)
-    tray_icon.run()
-threading.Thread(target=tray_icon_thread, daemon=True).start()
+tray_menu = pystray.Menu(pystray.MenuItem("Quit", quit_app))
+tray_icon = pystray.Icon("OptimizedKeyboardUI", create_image(), "Optimized Keyboard UI", tray_menu)
+tray_icon.on_clicked = show_window
+threading.Thread(target=tray_icon.run, daemon=True).start()
 try:
     root.mainloop()
 except KeyboardInterrupt:
