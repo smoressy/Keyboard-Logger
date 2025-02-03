@@ -1,0 +1,6 @@
+customtkinter
+pynput
+numpy
+sounddevice
+keyboard
+requests
