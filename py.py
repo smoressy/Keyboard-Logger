@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
-import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal
+import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal, sqlite3
 from collections import defaultdict
 from queue import Queue
 import tkinter as tk
 import customtkinter as ctk
 import keyboard
-
 try:
     import sounddevice as sd
     import numpy as np
 except ImportError:
     sd = None
     np = None
+import mouse
+try:
+    import pyautogui
+except ImportError:
+    pyautogui = None
+try:
+    from PIL import Image, ImageDraw, ImageFilter, ImageEnhance
+except ImportError:
+    Image = ImageDraw = ImageFilter = ImageEnhance = None
 
-# ================================
-# NEW MOUSE TRACKING CODE (Logger)
-# ================================
-
-import mouse  # Ensure this module is installed: pip install mouse
-
-# Global dictionary to hold daily mouse data for graphs
-mouse_data = {}  # Format: {"YYYY-MM-DD": {"left": 0, "right": 0, "middle": 0, "scroll": 0, "distance": 0.0}}
+# --------------------- Global Variables and Data Structures ---------------------
+mouse_data = {}
+mouse_click_positions = {"left": [], "right": [], "middle": []}
+mouse_movements = []
 
 class MouseStats:
     left_clicks = 0
@@ -48,6 +52,7 @@ def update_mouse_data(event_type, value):
 def handle_mouse_event(event):
     from mouse import MoveEvent, ButtonEvent, WheelEvent
     if isinstance(event, MoveEvent):
+        mouse_movements.append((time.time(), event.x, event.y))
         if MouseStats.last_position is not None:
             dx = event.x - MouseStats.last_position[0]
             dy = event.y - MouseStats.last_position[1]
@@ -57,31 +62,25 @@ def handle_mouse_event(event):
         MouseStats.last_position = (event.x, event.y)
     elif isinstance(event, ButtonEvent):
         if event.event_type in ('down', 'double'):
+            pos = mouse.get_position()
             if event.button == 'left':
                 MouseStats.left_clicks += 1
                 update_mouse_data("left", 1)
+                mouse_click_positions["left"].append(pos)
             elif event.button == 'right':
                 MouseStats.right_clicks += 1
                 update_mouse_data("right", 1)
+                mouse_click_positions["right"].append(pos)
             elif event.button == 'middle':
                 MouseStats.middle_clicks += 1
                 update_mouse_data("middle", 1)
+                mouse_click_positions["middle"].append(pos)
     elif isinstance(event, WheelEvent):
         delta_val = abs(event.delta)
         MouseStats.scroll_count += delta_val
         update_mouse_data("scroll", delta_val)
-    # The original logger emitted a signal; here we omit that for the tkinter UI.
 
-# Register the mouse hook (this now replaces the previous pynput-based listener)
 mouse.hook(handle_mouse_event)
-
-# ================================
-# End of NEW MOUSE TRACKING CODE
-# ================================
-
-# -------------------------------
-# HELPER FUNCTIONS
-# -------------------------------
 
 def seconds_to_hms(seconds):
     seconds = int(seconds)
@@ -90,21 +89,29 @@ def seconds_to_hms(seconds):
     s = seconds % 60
     return f"{h}h {m}m {s}s"
 
-# The missing update_activity() function:
 def update_activity():
     global last_activity_time
     last_activity_time = time.time()
 
-# -------------------------------
-# Cached font downloading functions and UI appearance settings
-# -------------------------------
-def safe_after(delay, func):
-    try:
-        if root.winfo_exists():
-            root.after(delay, func)
-    except Exception as e:
-        print(f"safe_after error: {e}..!")
+# --------------------- Safe “after” helper and global running flag ---------------------
+app_running = True  # Global flag to prevent scheduling after app closure
 
+def safe_after(delay, func):
+    if not app_running:
+        return
+    def wrapper():
+        try:
+            if app_running:
+                func()
+        except tk.TclError:
+            pass
+    try:
+        if app_running and root.winfo_exists():
+            root.after(delay, wrapper)
+    except tk.TclError:
+        pass
+
+# --------------------- Font Caching and Download ---------------------
 def get_cached_font(url, filename):
     temp_dir = tempfile.gettempdir()
     font_path = os.path.join(temp_dir, filename)
@@ -151,6 +158,7 @@ if os.name == "nt" and fa_path and os.path.exists(fa_path):
         print("failed to load Font Awesome font..!")
 FA_FONT = ("Font Awesome 6 Free Solid", 24)
 
+# --------------------- Setup the Main Tkinter Window ---------------------
 _dummy_root = tk.Tk()
 _dummy_root.withdraw()
 ctk.set_appearance_mode("Dark")
@@ -161,7 +169,7 @@ root.configure(bg="#121212")
 root.state("zoomed")
 root.minsize(800, 600)
 
-# --- Global variables for keyboard tracking ---
+# --------------------- Global Variables for Key/Word Stats ---------------------
 key_usage = {}
 key_press_duration = {}
 currently_pressed = {}
@@ -173,25 +181,10 @@ current_word = ""
 word_usage = defaultdict(int)
 word_daily_count = {}
 
-# Global variable to track activity
 last_activity_time = time.time()
 
-all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit",
-                       "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k",
-                       "shit", "shitty", "shitter", "shithole", "bullshit", "crap", "damn", "dammit",
-                       "goddamn", "goddammit", "s hit", "s.h.i.t", "s#it", "bitch", "bitches",
-                       "bitching", "bastard", "bastards", "asshole", "assholes", "ass", "arse",
-                       "arsehole", "b i t c h", "b*tch", "b!tch", "dick", "dickhead", "dumbass",
-                       "dickweed", "dickwad", "d i c k", "cunt", "cunts", "cock", "cocks", "clit",
-                       "clits", "cum", "cummer", "cumming", "pussy", "pussies", "c u n t", "c*nt",
-                       "c!nt", "whore", "whores", "slut", "sluts", "tramp", "trollop", "trollope",
-                       "son of a bitch", "son-of-a-bitch", "motherfucking", "fucking asshole",
-                       "f u c k e r", "s h i t", "b i t c h e s", "phuck", "phuk", "sh1t", "sh!t",
-                       "b!tches", "c0ck", "c0cks", "douche", "douchebag", "douchebags", "fuckoff",
-                       "fuck off", "f u c k off", "piss", "pissed", "pissing", "mf", "f u", "f u c"}
-racial_slurs_set = {"adolf", "hitler", "jew", "nigger", "niggers", "fag", "faggot", "faggots",
-                     "kike", "kikes", "chink", "chinks", "spic", "spics", "wetback", "wetbacks",
-                     "gook", "gooks", "kkk", "k.k.k"}
+all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit", "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k", "shit", "shitty", "shitter", "shithole", "bullshit", "crap", "damn", "dammit", "goddamn", "goddammit", "s hit", "s.h.i.t", "s#it", "bitch", "bitches", "bitching", "bastard", "bastards", "asshole", "assholes", "ass", "arse", "arsehole", "b i t c h", "b*tch", "b!tch", "dick", "dickhead", "dumbass", "dickweed", "dickwad", "d i c k", "cunt", "cunts", "cock", "cocks", "clit", "clits", "cum", "cummer", "cumming", "pussy", "pussies", "c u n t", "c*nt", "c!nt", "whore", "whores", "slut", "sluts", "tramp", "trollop", "trollope", "son of a bitch", "son-of-a-bitch", "motherfucking", "fucking asshole", "f u c k e r", "s h i t", "b i t c h e s", "phuck", "phuk", "sh1t", "sh!t", "b!tches", "c0ck", "c0cks", "douche", "douchebag", "douchebags", "fuckoff", "fuck off", "f u c k off", "piss", "pissed", "pissing", "mf", "f u", "f u c"}
+racial_slurs_set = {"adolf", "hitler", "jew", "nigger", "niggers", "fag", "faggot", "faggots", "kike", "kikes", "chink", "chinks", "spic", "spics", "wetback", "wetbacks", "gook", "gooks", "kkk", "k.k.k"}
 curse_general_set = all_curse_words_set - racial_slurs_set
 curse_general_count = 0
 racial_slurs_count = 0
@@ -199,7 +192,7 @@ fastest_wpm = 0
 screen_time_data = {}
 app_usage = {}
 
-# --- UI, keyboard, and statistics code below ---
+# --------------------- Build UI Frames ---------------------
 content_frame = ctk.CTkFrame(root, fg_color="#121212", corner_radius=10)
 content_frame.pack(expand=True, fill="both", padx=10, pady=10)
 keyboard_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
@@ -227,11 +220,18 @@ def check_window_state():
     safe_after(500, check_window_state)
 check_window_state()
 
+# --------------------- Clean Shutdown and Signal Handling ---------------------
 def on_closing():
+    global app_running
+    app_running = False
     keyboard.unhook_all()
     try:
         if root.winfo_exists():
             root.destroy()
+    except Exception:
+        pass
+    try:
+        db_conn.close()
     except Exception:
         pass
     sys.exit(0)
@@ -240,31 +240,13 @@ def signal_handler(sig, frame):
     on_closing()
 signal.signal(signal.SIGINT, signal_handler)
 
+# --------------------- Key Normalization and Mapping ---------------------
 def normalize_key(key):
     if key is None:
         return None
     key = key.strip()
     kl = key.lower()
-    mapping = {
-        "escape": "ESC", "esc": "ESC",
-        "backspace": "Backspace",
-        "return": "Enter", "enter": "Enter",
-        "caps_lock": "Caps", "caps lock": "Caps", "capslock": "Caps",
-        "shift": "Shift",
-        "shift_l": "Left Shift", "left shift": "Left Shift",
-        "shift_r": "Right Shift", "right shift": "Right Shift",
-        "control": "CTRL", "ctrl": "CTRL",
-        "control_l": "Left Ctrl", "control_r": "Right Ctrl",
-        "alt": "Alt", "alt_l": "Left Alt", "alt_r": "Right Alt",
-        "space": "SPACE", "tab": "Tab", "insert": "INSERT",
-        "home": "HOME", "end": "END", "delete": "Delete",
-        "print_screen": "PrtSc", "print screen": "PrtSc",
-        "prtsc": "PrtSc", "prt sc": "PrtSc", "prtscr": "PrtSc",
-        "fn": "Fn",
-        "windows": "Win", "win": "Win",
-        "super": "Win", "super_l": "Win", "super_r": "Win",
-        "up": "↑", "down": "↓", "left": "←", "right": "→"
-    }
+    mapping = {"escape": "ESC", "esc": "ESC", "backspace": "Backspace", "return": "Enter", "enter": "Enter", "caps_lock": "Caps", "caps lock": "Caps", "capslock": "Caps", "shift": "Shift", "shift_l": "Left Shift", "left shift": "Left Shift", "shift_r": "Right Shift", "right shift": "Right Shift", "control": "CTRL", "ctrl": "CTRL", "control_l": "Left Ctrl", "control_r": "Right Ctrl", "alt": "Alt", "alt_l": "Left Alt", "alt_r": "Right Alt", "space": "SPACE", "tab": "Tab", "insert": "INSERT", "home": "HOME", "end": "END", "delete": "Delete", "print_screen": "PrtSc", "print screen": "PrtSc", "prtsc": "PrtSc", "prt sc": "PrtSc", "prtscr": "PrtSc", "fn": "Fn", "windows": "Win", "win": "Win", "super": "Win", "super_l": "Win", "super_r": "Win", "up": "↑", "down": "↓", "left": "←", "right": "→"}
     if kl in mapping:
         return mapping[kl]
     if kl.startswith("f") and kl[1:].isdigit():
@@ -273,38 +255,12 @@ def normalize_key(key):
         return key.upper()
     return key
 
-sim_key_mapping = {
-    "ESC": "esc",
-    "Backspace": "backspace",
-    "Enter": "enter",
-    "Caps": "caps lock",
-    "Shift": "shift",
-    "Left Shift": "left shift",
-    "Right Shift": "right shift",
-    "CTRL": "ctrl",
-    "Left Ctrl": "left ctrl",
-    "Right Ctrl": "right ctrl",
-    "Alt": "alt",
-    "Left Alt": "left alt",
-    "Right Alt": "right alt",
-    "SPACE": "space",
-    "Tab": "tab",
-    "INSERT": "insert",
-    "HOME": "home",
-    "END": "end",
-    "Delete": "delete",
-    "PrtSc": "print screen",
-    "Fn": "fn",
-    "Win": "win",
-    "↑": "up",
-    "↓": "down",
-    "←": "left",
-    "→": "right"
-}
+sim_key_mapping = {"ESC": "esc", "Backspace": "backspace", "Enter": "enter", "Caps": "caps lock", "Shift": "shift", "Left Shift": "left shift", "Right Shift": "right shift", "CTRL": "ctrl", "Left Ctrl": "left ctrl", "Right Ctrl": "right ctrl", "Alt": "alt", "Left Alt": "left alt", "Right Alt": "right alt", "SPACE": "space", "Tab": "tab", "INSERT": "insert", "HOME": "home", "END": "end", "Delete": "delete", "PrtSc": "print screen", "Fn": "fn", "Win": "win", "↑": "up", "↓": "down", "←": "left", "→": "right"}
 
 def get_sim_key(key):
     return sim_key_mapping.get(key, key.lower() if len(key) == 1 else key.lower())
 
+# --------------------- AestheticKey and Keyboard Widgets ---------------------
 class AestheticKey(ctk.CTkFrame):
     def __init__(self, master, text, width=60, height=60, norm_key=None, shadow_offset=4, **kwargs):
         super().__init__(master, width=width+shadow_offset, height=height+shadow_offset+20, fg_color="#121212", corner_radius=10, **kwargs)
@@ -408,25 +364,15 @@ def create_key(parent, key_label, width, height, norm_override=None):
         keyboard_keys[widget.norm_key].append(widget)
     return widget
 
+# --------------------- Build the On-Screen Keyboard Layout ---------------------
 main_keys_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 main_keys_frame.pack(pady=10)
 row_defs = [
-    [("ESC", 60, 30), ("F1", 60, 30), ("F2", 60, 30), ("F3", 60, 30), ("F4", 60, 30),
-     ("F5", 60, 30), ("F6", 60, 30), ("F7", 60, 30), ("F8", 60, 30), ("F9", 60, 30),
-     ("F10", 60, 30), ("F11", 60, 30), ("F12", 60, 30), ("Home", 60, 30), ("End", 60, 30),
-     ("Insert", 60, 30), ("Delete", 60, 30)],
-    [("`", 60, 60), ("1", 60, 60), ("2", 60, 60), ("3", 60, 60), ("4", 60, 60),
-     ("5", 60, 60), ("6", 60, 60), ("7", 60, 60), ("8", 60, 60), ("9", 60, 60),
-     ("0", 60, 60), ("-", 60, 60), ("=", 60, 60), ("Delete", 100, 60, "Backspace")],
-    [("Tab", 80, 60), ("Q", 60, 60), ("W", 60, 60), ("E", 60, 60), ("R", 60, 60),
-     ("T", 60, 60), ("Y", 60, 60), ("U", 60, 60), ("I", 60, 60), ("O", 60, 60),
-     ("P", 60, 60), ("[", 60, 60), ("]", 60, 60), ("\\", 60, 60)],
-    [("Caps", 80, 60), ("A", 60, 60), ("S", 60, 60), ("D", 60, 60), ("F", 60, 60),
-     ("G", 60, 60), ("H", 60, 60), ("J", 60, 60), ("K", 60, 60), ("L", 60, 60),
-     (";", 60, 60), ("'", 60, 60), ("Enter", 100, 60)],
-    [("Shift", 100, 60, "Left Shift"), ("Z", 60, 60), ("X", 60, 60), ("C", 60, 60),
-     ("V", 60, 60), ("B", 60, 60), ("N", 60, 60), ("M", 60, 60), (",", 60, 60),
-     (".", 60, 60), ("/", 60, 60), ("Shift", 100, 60, "Right Shift")]
+    [("ESC", 60, 30), ("F1", 60, 30), ("F2", 60, 30), ("F3", 60, 30), ("F4", 60, 30), ("F5", 60, 30), ("F6", 60, 30), ("F7", 60, 30), ("F8", 60, 30), ("F9", 60, 30), ("F10", 60, 30), ("F11", 60, 30), ("F12", 60, 30), ("Home", 60, 30), ("End", 60, 30), ("Insert", 60, 30), ("Delete", 60, 30)],
+    [("`", 60, 60), ("1", 60, 60), ("2", 60, 60), ("3", 60, 60), ("4", 60, 60), ("5", 60, 60), ("6", 60, 60), ("7", 60, 60), ("8", 60, 60), ("9", 60, 60), ("0", 60, 60), ("-", 60, 60), ("=", 60, 60), ("Delete", 100, 60, "Backspace")],
+    [("Tab", 80, 60), ("Q", 60, 60), ("W", 60, 60), ("E", 60, 60), ("R", 60, 60), ("T", 60, 60), ("Y", 60, 60), ("U", 60, 60), ("I", 60, 60), ("O", 60, 60), ("P", 60, 60), ("[", 60, 60), ("]", 60, 60), ("\\", 60, 60)],
+    [("Caps", 80, 60), ("A", 60, 60), ("S", 60, 60), ("D", 60, 60), ("F", 60, 60), ("G", 60, 60), ("H", 60, 60), ("J", 60, 60), ("K", 60, 60), ("L", 60, 60), (";", 60, 60), ("'", 60, 60), ("Enter", 100, 60)],
+    [("Shift", 100, 60, "Left Shift"), ("Z", 60, 60), ("X", 60, 60), ("C", 60, 60), ("V", 60, 60), ("B", 60, 60), ("N", 60, 60), ("M", 60, 60), (",", 60, 60), (".", 60, 60), ("/", 60, 60), ("Shift", 100, 60, "Right Shift")]
 ]
 for row in row_defs:
     row_frame = ctk.CTkFrame(main_keys_frame, fg_color="#121212", corner_radius=10)
@@ -442,16 +388,7 @@ for row in row_defs:
         
 space_row_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 space_row_frame.pack(pady=10)
-space_keys = [
-    ("Fn", 60, 60),
-    ("Ctrl", 60, 60, "Left Ctrl"),
-    ("Win", 60, 60),
-    ("Alt", 60, 60, "Left Alt"),
-    ("Space", 300, 60),
-    ("Alt", 60, 60, "Right Alt"),
-    ("PrtSc", 60, 60),
-    ("Ctrl", 60, 60, "Right Ctrl")
-]
+space_keys = [("Fn", 60, 60), ("Ctrl", 60, 60, "Left Ctrl"), ("Win", 60, 60), ("Alt", 60, 60, "Left Alt"), ("Space", 300, 60), ("Alt", 60, 60, "Right Alt"), ("PrtSc", 60, 60), ("Ctrl", 60, 60, "Right Ctrl")]
 for key_tuple in space_keys:
     if len(key_tuple) == 4:
         key_label, key_w, key_h, norm_override = key_tuple
@@ -472,6 +409,7 @@ down_key.place(x=15, y=30)
 right_key = create_key(arrow_cluster_frame, "→", 30, 30)
 right_key.place(x=30, y=30)
 
+# --------------------- Performance Mode and Checkboxes ---------------------
 performance_mode_var = ctk.BooleanVar(value=False)
 def performance_mode_toggle():
     global performance_mode_active, performance_mode_frame
@@ -520,6 +458,7 @@ key_press_checkbox.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 perf_checkbox = ctk.CTkCheckBox(keyboard_frame, text="Performance Mode", variable=performance_mode_var, font=("Poppins", 14), text_color="white", fg_color="#121212", command=performance_mode_toggle)
 perf_checkbox.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
 
+# --------------------- Statistics (Graph/Text) UI ---------------------
 stats_option_var = ctk.StringVar(value="Line Graph")
 stats_option_menu = ctk.CTkOptionMenu(statistics_frame, values=["Line Graph", "Plain Text"], variable=stats_option_var, font=CUSTOM_FONT)
 stats_option_menu.pack(pady=10)
@@ -619,6 +558,7 @@ def update_key_counts():
     safe_after(KEY_COUNTS_INTERVAL, update_key_counts)
 update_key_counts()
 
+# --------------------- Screen Time Tracking ---------------------
 def update_screen_time_loop():
     now = time.time()
     delta = now - update_screen_time_loop.last_check
@@ -731,6 +671,7 @@ def update_weekly_bars():
     safe_after(1000, update_weekly_bars)
 update_weekly_bars()
 
+# --------------------- Mouse UI ---------------------
 mouse_title = ctk.CTkLabel(mouse_frame, text="🖱 Mouse", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 mouse_title.pack(pady=(20,10))
 mouse_scroll_canvas = tk.Canvas(mouse_frame, bg="#121212", highlightthickness=0)
@@ -800,6 +741,35 @@ def update_mouse_line_graph():
         mouse_canvas.create_line(*coords, fill="cyan", width=2, smooth=True)
     safe_after(1000, update_mouse_line_graph)
 update_mouse_line_graph()
+
+def download_heatmap_data():
+    if pyautogui is None or Image is None:
+        print("Required libraries for heatmap (pyautogui and Pillow) are not installed.")
+        return
+    screenshot = pyautogui.screenshot()
+    screenshot = screenshot.convert("RGBA")
+    width, height = screenshot.size
+    overlay = Image.new("RGBA", (width, height), (0,0,0,0))
+    draw = ImageDraw.Draw(overlay)
+    all_clicks = mouse_click_positions["left"] + mouse_click_positions["right"] + mouse_click_positions["middle"]
+    for (x, y) in all_clicks:
+        radius = 20
+        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill=(255,0,0,80))
+    overlay = overlay.filter(ImageFilter.GaussianBlur(radius=15))
+    heatmap = Image.alpha_composite(screenshot, overlay)
+    downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(downloads_dir, f"heatmap_{timestamp}.png")
+    try:
+        heatmap.save(filename)
+        print(f"Heatmap saved to {filename}")
+    except Exception as e:
+        print(f"Error saving heatmap: {e}")
+
+download_heatmap_button = ctk.CTkButton(mouse_frame, text="Download Heatmap", font=("Poppins", 16), command=download_heatmap_data)
+download_heatmap_button.pack(pady=10)
+
+# --------------------- Words UI ---------------------
 words_title = ctk.CTkLabel(words_frame, text="✏️ Words", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 words_title.pack(pady=(20,10))
 words_textbox = ctk.CTkTextbox(words_frame, font=("Poppins", 14, "bold"), fg_color="#121212", text_color="#FFFFFF", height=200)
@@ -853,6 +823,7 @@ def update_words_ui():
     safe_after(1000, update_words_ui)
 update_words_ui()
 
+# --------------------- Screen Switching and Sidebar ---------------------
 def switch_screen(screen):
     global current_screen
     current_screen = screen
@@ -875,25 +846,27 @@ def switch_screen(screen):
     elif screen == "Words":
         words_frame.pack(expand=True, fill="both")
 
-sidebar_width = 250
-sidebar_height = 450
+sidebar_width = 300
+sidebar_height = 500
 sidebar_y = 10
 sidebar_current_x = -sidebar_width
-sidebar_panel = ctk.CTkFrame(root, fg_color="#0d0d0d", width=sidebar_width, height=sidebar_height)
+sidebar_panel = ctk.CTkFrame(root, fg_color="#222222", width=sidebar_width, height=sidebar_height, corner_radius=20)
 sidebar_panel.place(x=sidebar_current_x, y=sidebar_y)
-btn_keyboard = ctk.CTkButton(sidebar_panel, text="Keyboard", font=CUSTOM_FONT, command=lambda: [switch_screen("Keyboard"), animate_sidebar_close()], fg_color="#1a1a1a", hover_color="#333333")
+btn_font = ("Poppins", 18, "bold")
+btn_params = {"font": btn_font, "fg_color": "#333333", "hover_color": "#555555", "corner_radius": 10}
+btn_keyboard = ctk.CTkButton(sidebar_panel, text="Keyboard", command=lambda: [switch_screen("Keyboard"), animate_sidebar_close()], **btn_params)
 btn_keyboard.pack(pady=12, padx=20, fill="x")
-btn_statistics = ctk.CTkButton(sidebar_panel, text="Statistics", font=CUSTOM_FONT, command=lambda: [switch_screen("Statistics"), animate_sidebar_close()], fg_color="#1a1a1a", hover_color="#333333")
+btn_statistics = ctk.CTkButton(sidebar_panel, text="Statistics", command=lambda: [switch_screen("Statistics"), animate_sidebar_close()], **btn_params)
 btn_statistics.pack(pady=12, padx=20, fill="x")
-btn_settings = ctk.CTkButton(sidebar_panel, text="Settings", font=CUSTOM_FONT, command=lambda: [switch_screen("Settings"), animate_sidebar_close()], fg_color="#1a1a1a", hover_color="#333333")
+btn_settings = ctk.CTkButton(sidebar_panel, text="Settings", command=lambda: [switch_screen("Settings"), animate_sidebar_close()], **btn_params)
 btn_settings.pack(pady=12, padx=20, fill="x")
-btn_recap = ctk.CTkButton(sidebar_panel, text="Recap", font=CUSTOM_FONT, command=lambda: [switch_screen("Recap"), animate_sidebar_close()], fg_color="#1a1a1a", hover_color="#333333")
+btn_recap = ctk.CTkButton(sidebar_panel, text="Recap", command=lambda: [switch_screen("Recap"), animate_sidebar_close()], **btn_params)
 btn_recap.pack(pady=12, padx=20, fill="x")
-btn_screen_time = ctk.CTkButton(sidebar_panel, text="Screen Time", font=CUSTOM_FONT, command=lambda: [switch_screen("Screen Time"), animate_sidebar_close()], fg_color="#1a1a1a", hover_color="#333333")
+btn_screen_time = ctk.CTkButton(sidebar_panel, text="Screen Time", command=lambda: [switch_screen("Screen Time"), animate_sidebar_close()], **btn_params)
 btn_screen_time.pack(pady=12, padx=20, fill="x")
-btn_mouse = ctk.CTkButton(sidebar_panel, text="Mouse", font=CUSTOM_FONT, command=lambda: [switch_screen("Mouse"), animate_sidebar_close()], fg_color="#1a1a1a", hover_color="#333333")
+btn_mouse = ctk.CTkButton(sidebar_panel, text="Mouse", command=lambda: [switch_screen("Mouse"), animate_sidebar_close()], **btn_params)
 btn_mouse.pack(pady=12, padx=20, fill="x")
-btn_words = ctk.CTkButton(sidebar_panel, text="Words", font=CUSTOM_FONT, command=lambda: [switch_screen("Words"), animate_sidebar_close()], fg_color="#1a1a1a", hover_color="#333333")
+btn_words = ctk.CTkButton(sidebar_panel, text="Words", command=lambda: [switch_screen("Words"), animate_sidebar_close()], **btn_params)
 btn_words.pack(pady=12, padx=20, fill="x")
 
 def animate_sidebar_open():
@@ -955,9 +928,7 @@ def animate_hamburger_hover_in(event):
 def animate_hamburger_hover_out(event):
     animate_button_color(hamburger_button, hamburger_button.cget("fg_color"), root.cget("bg"))
 
-hamburger_button = ctk.CTkButton(root, text="\uf0c9", font=FA_FONT, width=40, height=40,
-                                 fg_color=root.cget("bg"), hover_color=root.cget("bg"),
-                                 corner_radius=20, command=open_sidebar, text_color="white")
+hamburger_button = ctk.CTkButton(root, text="\uf0c9", font=FA_FONT, width=40, height=40, fg_color=root.cget("bg"), hover_color=root.cget("bg"), corner_radius=20, command=open_sidebar, text_color="white")
 hamburger_button.place(x=10, y=10, anchor="nw")
 hamburger_button.bind("<Enter>", animate_hamburger_hover_in)
 hamburger_button.bind("<Leave>", animate_hamburger_hover_out)
@@ -1092,11 +1063,7 @@ if os.name == "nt":
     except AttributeError:
         LRESULT = ctypes.c_long
     class KBDLLHOOKSTRUCT(ctypes.Structure):
-        _fields_ = [("vkCode", wintypes.DWORD),
-                    ("scanCode", wintypes.DWORD),
-                    ("flags", wintypes.DWORD),
-                    ("time", wintypes.DWORD),
-                    ("dwExtraInfo", ctypes.c_ulong)]
+        _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD), ("flags", wintypes.DWORD), ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_ulong)]
     LowLevelKeyboardProc = ctypes.WINFUNCTYPE(LRESULT, wintypes.INT, wintypes.WPARAM, wintypes.LPARAM)
     def py_low_level_keyboard_proc(nCode, wParam, lParam):
         if nCode == 0:
@@ -1201,16 +1168,20 @@ def update_recap():
     safe_after(1000, update_recap)
 update_recap()
 
-DATA_FILE = os.path.join(os.getcwd(), "data.json")
-def write_json(data):
-    try:
-        with open(DATA_FILE, "w") as f:
-            json.dump(data, f)
-    except Exception as e:
-        print(f"error saving data.json: {e}..!")
+# --------------------- SQLite Persistence (instead of JSON file) ---------------------
+# Create (or open) a SQLite database file named "data"
+db_conn = sqlite3.connect("data", check_same_thread=False)
+db_cursor = db_conn.cursor()
+db_cursor.execute("""CREATE TABLE IF NOT EXISTS app_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL,
+    state TEXT
+)""")
+db_conn.commit()
 
 def save_data():
     data = {
+        "timestamp": time.time(),
         "key_usage": key_usage,
         "total_key_count": total_key_count,
         "word_usage": dict(word_usage),
@@ -1225,47 +1196,57 @@ def save_data():
         "mouse_scroll_count": MouseStats.scroll_count,
         "mouse_total_distance": MouseStats.total_distance,
         "mouse_data": mouse_data,
+        "mouse_click_positions": mouse_click_positions,
+        "mouse_movements": mouse_movements,
         "app_usage": app_usage,
         "fastest_wpm": fastest_wpm,
         "current_word": current_word,
         "key_press_duration": key_press_duration
     }
-    threading.Thread(target=write_json, args=(data,), daemon=True).start()
+    state_str = json.dumps(data)
+    try:
+        db_cursor.execute("INSERT INTO app_state (timestamp, state) VALUES (?, ?)", (time.time(), state_str))
+        db_conn.commit()
+    except Exception as e:
+        print(f"Error saving state to SQLite: {e}")
 
 def periodic_data_update():
     save_data()
-    safe_after(30000, periodic_data_update)
+    safe_after(60000, periodic_data_update)
+periodic_data_update()
 
 def load_data():
-    global key_usage, total_key_count, word_usage, word_daily_count, curse_general_count, racial_slurs_count, app_start_time, screen_time_data, mouse_data, app_usage, fastest_wpm, current_word, key_press_duration
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as f:
-                data = json.load(f)
-                key_usage = data.get("key_usage", {})
-                total_key_count = data.get("total_key_count", 0)
-                word_usage.update(data.get("word_usage", {}))
-                word_daily_count = data.get("word_daily_count", {})
-                curse_general_count = data.get("curse_general_count", 0)
-                racial_slurs_count = data.get("racial_slurs_count", 0)
-                app_start_time = data.get("app_start_time", app_start_time)
-                screen_time_data = data.get("screen_time_data", {})
-                mouse_data.update(data.get("mouse_data", {}))
-                MouseStats.left_clicks = data.get("mouse_left_clicks", 0)
-                MouseStats.right_clicks = data.get("mouse_right_clicks", 0)
-                MouseStats.middle_clicks = data.get("mouse_middle_clicks", 0)
-                MouseStats.scroll_count = data.get("mouse_scroll_count", 0)
-                MouseStats.total_distance = data.get("mouse_total_distance", 0.0)
-                app_usage = data.get("app_usage", {})
-                fastest_wpm = data.get("fastest_wpm", 0)
-                current_word = data.get("current_word", "")
-                key_press_duration.update(data.get("key_press_duration", {}))
-        except Exception as e:
-            print(f"error loading data.json: {e}..!")
-    else:
-        save_data()
+    global key_usage, total_key_count, word_usage, word_daily_count, curse_general_count, racial_slurs_count, app_start_time, screen_time_data, mouse_data, mouse_click_positions, mouse_movements, app_usage, fastest_wpm, current_word, key_press_duration
+    try:
+        db_cursor.execute("SELECT state FROM app_state ORDER BY timestamp DESC LIMIT 1")
+        row = db_cursor.fetchone()
+        if row is not None:
+            state_str = row[0]
+            data = json.loads(state_str)
+            key_usage = data.get("key_usage", {})
+            total_key_count = data.get("total_key_count", 0)
+            word_usage.update(data.get("word_usage", {}))
+            word_daily_count = data.get("word_daily_count", {})
+            curse_general_count = data.get("curse_general_count", 0)
+            racial_slurs_count = data.get("racial_slurs_count", 0)
+            app_start_time = data.get("app_start_time", app_start_time)
+            screen_time_data = data.get("screen_time_data", {})
+            mouse_data.update(data.get("mouse_data", {}))
+            MouseStats.left_clicks = data.get("mouse_left_clicks", 0)
+            MouseStats.right_clicks = data.get("mouse_right_clicks", 0)
+            MouseStats.middle_clicks = data.get("mouse_middle_clicks", 0)
+            MouseStats.scroll_count = data.get("mouse_scroll_count", 0)
+            MouseStats.total_distance = data.get("mouse_total_distance", 0.0)
+            mouse_click_positions.update(data.get("mouse_click_positions", {}))
+            mouse_movements.extend(data.get("mouse_movements", []))
+            app_usage = data.get("app_usage", {})
+            fastest_wpm = data.get("fastest_wpm", 0)
+            current_word = data.get("current_word", "")
+            key_press_duration.update(data.get("key_press_duration", {}))
+    except Exception as e:
+        print(f"Error loading state from SQLite: {e}")
+
 load_data()
-periodic_data_update()
 switch_screen("Keyboard")
 try:
     root.mainloop()
