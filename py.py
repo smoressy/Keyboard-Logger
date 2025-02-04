@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal
+import sys, os, ctypes, time, threading, tempfile, requests, json, math, datetime, signal, sqlite3
 from collections import defaultdict
 from queue import Queue
 import tkinter as tk
@@ -22,6 +22,74 @@ except ImportError:
     Image = ImageDraw = ImageFilter = ImageEnhance = None
 import pystray
 
+# --- SIGINT handler for graceful shutdown ---
+def sigint_handler(sig, frame):
+    global app_running
+    app_running = False
+    try:
+        root.destroy()
+    except Exception:
+        pass
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, sigint_handler)
+# --- End SIGINT handler ---
+
+# ---------------- SQLite Database Setup ----------------
+# Database file will be created in the current working directory.
+DB_FILE = os.path.join(os.getcwd(), "app_data.db")
+db_lock = threading.Lock()
+
+def init_db():
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            # Create table if it doesn't exist.
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL,
+                    data TEXT
+                )
+            ''')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"error initializing database: {e}")
+
+def write_to_db(data):
+    with db_lock:
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            ts = data.get("timestamp", time.time())
+            c.execute("INSERT INTO log (timestamp, data) VALUES (?, ?)", (ts, json.dumps(data)))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"error writing to database: {e}")
+
+def load_from_db():
+    with db_lock:
+        if not os.path.exists(DB_FILE):
+            return None
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute("SELECT data FROM log ORDER BY id DESC LIMIT 1")
+            row = c.fetchone()
+            conn.close()
+            if row:
+                return json.loads(row[0])
+        except Exception as e:
+            print(f"error loading data from database: {e}")
+        return None
+
+init_db()
+# ---------------- End SQLite Database Setup ----------------
+
+# Global data variables
 mouse_data = {}
 mouse_click_positions = {"left": [], "right": [], "middle": []}
 mouse_movements = []
@@ -93,20 +161,22 @@ def update_activity():
     global last_activity_time
     last_activity_time = time.time()
 
+# Global flag for app status
 app_running = True
 
+# -----------------------------------------------------------------------------
+# Modified safe_after: simply schedule using root.after without thread-checks.
 def safe_after(delay, func):
     def wrapper():
         try:
-            if app_running and root.winfo_exists():
-                func()
-        except tk.TclError:
+            func()
+        except Exception:
             pass
     try:
-        if app_running and root.winfo_exists():
-            root.after(delay, wrapper)
-    except tk.TclError:
+        root.after(delay, wrapper)
+    except RuntimeError:
         pass
+# -----------------------------------------------------------------------------
 
 def get_cached_font(url, filename):
     temp_dir = tempfile.gettempdir()
@@ -165,6 +235,7 @@ root.state("zoomed")
 root.minsize(800, 600)
 root.protocol("WM_DELETE_WINDOW", lambda: root.withdraw())
 
+# Data tracking for keyboard events and words
 key_usage = {}
 key_press_duration = {}
 currently_pressed = {}
@@ -187,6 +258,7 @@ fastest_wpm = 0
 screen_time_data = {}
 app_usage = {}
 
+# Create main content frames
 content_frame = ctk.CTkFrame(root, fg_color="#121212", corner_radius=10)
 content_frame.pack(expand=True, fill="both", padx=10, pady=10)
 keyboard_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
@@ -199,12 +271,15 @@ words_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 current_screen = "Keyboard"
 performance_mode_active = False
 performance_mode_frame = None
-SLOW_HARDWARE = (os.cpu_count() is not None and os.cpu_count() < 4)
-KEY_COUNTS_INTERVAL = 1000 if SLOW_HARDWARE else 300
-STATS_INTERVAL = 500 if SLOW_HARDWARE else 166
-CAPSLOCK_INTERVAL = 500 if SLOW_HARDWARE else 100
-maximized_fix_done = False
 
+# Use slower update intervals to reduce UI lag.
+UI_UPDATE_INTERVAL = 1000
+SLOW_HARDWARE = True
+KEY_COUNTS_INTERVAL = UI_UPDATE_INTERVAL
+STATS_INTERVAL = UI_UPDATE_INTERVAL
+CAPSLOCK_INTERVAL = UI_UPDATE_INTERVAL
+
+maximized_fix_done = False
 def check_window_state():
     global maximized_fix_done
     if not maximized_fix_done:
@@ -973,7 +1048,7 @@ def process_key_events():
             on_key_press(event_obj)
         elif event_type == "release":
             on_key_release(event_obj)
-    safe_after(10, process_key_events)
+    safe_after(50, process_key_events)
 process_key_events()
 def on_key_press(event):
     global total_key_count, current_word, curse_general_count, racial_slurs_count
@@ -1005,9 +1080,18 @@ def on_key_press(event):
         current_word = ""
     if key == "Tab":
         def check_alt_fallback():
-            if (keyboard.is_pressed("alt") or keyboard.is_pressed("left alt") or keyboard.is_pressed("right alt")) and not any(k in currently_pressed for k in ["Alt", "Left Alt", "Right Alt"]):
-                on_key_press(type("DummyEvent", (), {"keysym": "Alt", "from_hook": True}))
-        safe_after(50, check_alt_fallback)
+            if not any(k in currently_pressed for k in ["Alt", "Left Alt", "Right Alt"]):
+                key_usage["Alt"] = key_usage.get("Alt", 0) + 1
+                for widget in keyboard_keys.get("Alt", []):
+                    widget.update_count(key_usage["Alt"])
+        safe_after(10000, check_alt_fallback)
+    if key in ["Alt", "Left Alt", "Right Alt"]:
+        def check_tab_fallback():
+            if "Tab" not in currently_pressed:
+                key_usage["Tab"] = key_usage.get("Tab", 0) + 1
+                for widget in keyboard_keys.get("Tab", []):
+                    widget.update_count(key_usage["Tab"])
+        safe_after(10000, check_tab_fallback)
 def on_key_release(event):
     if not getattr(event, "keysym", None):
         return
@@ -1167,24 +1251,9 @@ def update_recap():
     racial_slurs_label.configure(text=f"Racial Slurs Typed: {racial_slurs_count}")
     safe_after(1000, update_recap)
 update_recap()
-DATA_FILE = os.path.join(os.getcwd(), "data_log.json")
-def write_json(data):
-    try:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "r") as f:
-                try:
-                    log = json.load(f)
-                    if not isinstance(log, list):
-                        log = []
-                except Exception:
-                    log = []
-        else:
-            log = []
-        log.append(data)
-        with open(DATA_FILE, "w") as f:
-            json.dump(log, f)
-    except Exception as e:
-        print(f"error saving data_log.json: {e}..!")
+
+# ---------------- Database Read/Write Functions ----------------
+
 def save_data():
     data = {
         "timestamp": time.time(),
@@ -1209,44 +1278,43 @@ def save_data():
         "current_word": current_word,
         "key_press_duration": key_press_duration
     }
-    threading.Thread(target=write_json, args=(data,), daemon=True).start()
+    threading.Thread(target=write_to_db, args=(data,), daemon=True).start()
+
 def periodic_data_update():
     save_data()
     safe_after(60000, periodic_data_update)
+
 def load_data():
     global key_usage, total_key_count, word_usage, word_daily_count, curse_general_count, racial_slurs_count, app_start_time, screen_time_data, mouse_data, mouse_click_positions, mouse_movements, app_usage, fastest_wpm, current_word, key_press_duration
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as f:
-                log = json.load(f)
-                if isinstance(log, list) and log:
-                    data = log[-1]
-                    key_usage = data.get("key_usage", {})
-                    total_key_count = data.get("total_key_count", 0)
-                    word_usage.update(data.get("word_usage", {}))
-                    word_daily_count = data.get("word_daily_count", {})
-                    curse_general_count = data.get("curse_general_count", 0)
-                    racial_slurs_count = data.get("racial_slurs_count", 0)
-                    app_start_time = data.get("app_start_time", app_start_time)
-                    screen_time_data = data.get("screen_time_data", {})
-                    mouse_data.update(data.get("mouse_data", {}))
-                    MouseStats.left_clicks = data.get("mouse_left_clicks", 0)
-                    MouseStats.right_clicks = data.get("mouse_right_clicks", 0)
-                    MouseStats.middle_clicks = data.get("mouse_middle_clicks", 0)
-                    MouseStats.scroll_count = data.get("mouse_scroll_count", 0)
-                    MouseStats.total_distance = data.get("mouse_total_distance", 0.0)
-                    mouse_click_positions.update(data.get("mouse_click_positions", {}))
-                    mouse_movements.extend(data.get("mouse_movements", []))
-                    app_usage = data.get("app_usage", {})
-                    fastest_wpm = data.get("fastest_wpm", 0)
-                    current_word = data.get("current_word", "")
-                    key_press_duration.update(data.get("key_press_duration", {}))
-        except Exception as e:
-            print(f"error loading data_log.json: {e}..!")
+    data = load_from_db()
+    if data:
+        key_usage = data.get("key_usage", {})
+        total_key_count = data.get("total_key_count", 0)
+        word_usage.update(data.get("word_usage", {}))
+        word_daily_count = data.get("word_daily_count", {})
+        curse_general_count = data.get("curse_general_count", 0)
+        racial_slurs_count = data.get("racial_slurs_count", 0)
+        app_start_time = data.get("app_start_time", app_start_time)
+        screen_time_data = data.get("screen_time_data", {})
+        mouse_data.update(data.get("mouse_data", {}))
+        MouseStats.left_clicks = data.get("mouse_left_clicks", 0)
+        MouseStats.right_clicks = data.get("mouse_right_clicks", 0)
+        MouseStats.middle_clicks = data.get("mouse_middle_clicks", 0)
+        MouseStats.scroll_count = data.get("mouse_scroll_count", 0)
+        MouseStats.total_distance = data.get("mouse_total_distance", 0.0)
+        mouse_click_positions.update(data.get("mouse_click_positions", {}))
+        mouse_movements.extend(data.get("mouse_movements", []))
+        app_usage = data.get("app_usage", {})
+        fastest_wpm = data.get("fastest_wpm", 0)
+        current_word = data.get("current_word", "")
+        key_press_duration.update(data.get("key_press_duration", {}))
     else:
         save_data()
+
 load_data()
 periodic_data_update()
+# ---------------- End Database Read/Write Functions ----------------
+
 settings_title = ctk.CTkLabel(settings_frame, text="Settings", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 settings_title.pack(pady=(20,10))
 appearance_mode_var = ctk.StringVar(value="Dark")
