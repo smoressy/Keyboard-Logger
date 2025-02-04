@@ -89,6 +89,7 @@ def backup_data_folder():
 def periodic_backup():
     backup_data_folder()
     safe_after(3600000, periodic_backup)
+
 def sigint_handler(sig, frame):
     global app_running
     app_running = False
@@ -333,13 +334,16 @@ def check_window_state():
             maximized_fix_done = True
     safe_after(500, check_window_state)
 check_window_state()
+
 def on_closing():
     root.withdraw()
+
 def quit_app(icon, event):
     global app_running
     app_running = False
     icon.stop()
     os._exit(0)
+
 def normalize_key(key):
     if key is None:
         return None
@@ -353,9 +357,11 @@ def normalize_key(key):
     if len(key) == 1 and key.isalpha():
         return key.upper()
     return key
+
 sim_key_mapping = {"ESC": "esc", "Backspace": "backspace", "Enter": "enter", "Caps": "caps lock", "Shift": "shift", "Left Shift": "left shift", "Right Shift": "right shift", "CTRL": "ctrl", "Left Ctrl": "left ctrl", "Right Ctrl": "right ctrl", "Alt": "alt", "Left Alt": "left alt", "Right Alt": "right alt", "SPACE": "space", "Tab": "tab", "INSERT": "insert", "HOME": "home", "END": "end", "Delete": "delete", "PrtSc": "print screen", "Fn": "fn", "Win": "win", "↑": "up", "↓": "down", "←": "left", "→": "right"}
 def get_sim_key(key):
     return sim_key_mapping.get(key, key.lower() if len(key) == 1 else key.lower())
+
 class AestheticKey(ctk.CTkFrame):
     def __init__(self, master, text, width=60, height=60, norm_key=None, shadow_offset=4, **kwargs):
         super().__init__(master, width=width+shadow_offset, height=height+shadow_offset+20, fg_color="#121212", corner_radius=10, **kwargs)
@@ -457,6 +463,7 @@ def create_key(parent, key_label, width, height, norm_override=None):
     if widget.norm_key is not None:
         keyboard_keys[widget.norm_key].append(widget)
     return widget
+
 main_keys_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 main_keys_frame.pack(pady=10)
 row_defs = [
@@ -498,6 +505,7 @@ down_key = create_key(arrow_cluster_frame, "↓", 30, 30)
 down_key.place(x=15, y=30)
 right_key = create_key(arrow_cluster_frame, "→", 30, 30)
 right_key.place(x=30, y=30)
+
 performance_mode_var = ctk.BooleanVar(value=False)
 def performance_mode_toggle():
     global performance_mode_active, performance_mode_frame
@@ -1486,19 +1494,29 @@ def export_data():
 export_button_page = ctk.CTkButton(export_frame, text="Export", font=("Poppins", 18, "bold"), fg_color="#3E4A59", hover_color="#5A6775", corner_radius=10, command=export_data)
 export_button_page.pack(pady=12, padx=20, fill="x")
 switch_screen("Keyboard")
+
 def show_window(icon, event):
     if app_running and root.winfo_exists():
         root.deiconify()
         root.state("zoomed")
+
+def open_window_tray(icon, item):
+    show_window(icon, None)
+
 def create_image():
     width = 64
     height = 64
     image = Image.new("RGB", (width, height), "gray")
     return image
-tray_menu = pystray.Menu(pystray.MenuItem("Quit", quit_app))
+
+tray_menu = pystray.Menu(
+    pystray.MenuItem("Open", open_window_tray),
+    pystray.MenuItem("Quit", quit_app)
+)
 tray_icon = pystray.Icon("OptimizedKeyboardUI", create_image(), "Optimized Keyboard UI", tray_menu)
 tray_icon.on_clicked = show_window
 threading.Thread(target=tray_icon.run, daemon=True).start()
+
 try:
     root.mainloop()
 except KeyboardInterrupt:
