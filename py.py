@@ -22,7 +22,6 @@ except ImportError:
     Image = ImageDraw = ImageFilter = ImageEnhance = None
 import pystray
 
-# --- SIGINT handler for graceful shutdown ---
 def sigint_handler(sig, frame):
     global app_running
     app_running = False
@@ -31,33 +30,24 @@ def sigint_handler(sig, frame):
     except Exception:
         pass
     sys.exit(0)
-
 signal.signal(signal.SIGINT, sigint_handler)
-# --- End SIGINT handler ---
 
-# ---------------- SQLite Database Setup ----------------
-# Database file will be created in the current working directory.
 DB_FILE = os.path.join(os.getcwd(), "app_data.db")
 db_lock = threading.Lock()
-
 def init_db():
     with db_lock:
         try:
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
-            # Create table if it doesn't exist.
-            c.execute('''
-                CREATE TABLE IF NOT EXISTS log (
+            c.execute('''CREATE TABLE IF NOT EXISTS log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp REAL,
                     data TEXT
-                )
-            ''')
+                )''')
             conn.commit()
             conn.close()
         except Exception as e:
             print(f"error initializing database: {e}")
-
 def write_to_db(data):
     with db_lock:
         try:
@@ -69,7 +59,6 @@ def write_to_db(data):
             conn.close()
         except Exception as e:
             print(f"error writing to database: {e}")
-
 def load_from_db():
     with db_lock:
         if not os.path.exists(DB_FILE):
@@ -85,11 +74,8 @@ def load_from_db():
         except Exception as e:
             print(f"error loading data from database: {e}")
         return None
-
 init_db()
-# ---------------- End SQLite Database Setup ----------------
 
-# Global data variables
 mouse_data = {}
 mouse_click_positions = {"left": [], "right": [], "middle": []}
 mouse_movements = []
@@ -147,7 +133,6 @@ def handle_mouse_event(event):
         delta_val = abs(event.delta)
         MouseStats.scroll_count += delta_val
         update_mouse_data("scroll", delta_val)
-
 mouse.hook(handle_mouse_event)
 
 def seconds_to_hms(seconds):
@@ -156,16 +141,11 @@ def seconds_to_hms(seconds):
     m = (seconds % 3600) // 60
     s = seconds % 60
     return f"{h}h {m}m {s}s"
-
 def update_activity():
     global last_activity_time
     last_activity_time = time.time()
 
-# Global flag for app status
 app_running = True
-
-# -----------------------------------------------------------------------------
-# Modified safe_after: simply schedule using root.after without thread-checks.
 def safe_after(delay, func):
     def wrapper():
         try:
@@ -176,8 +156,13 @@ def safe_after(delay, func):
         root.after(delay, wrapper)
     except RuntimeError:
         pass
-# -----------------------------------------------------------------------------
-
+def get_ui_delay(delay):
+    try:
+        if root.winfo_viewable():
+            return delay
+    except Exception:
+        return delay
+    return delay * 10
 def get_cached_font(url, filename):
     temp_dir = tempfile.gettempdir()
     font_path = os.path.join(temp_dir, filename)
@@ -207,7 +192,6 @@ def get_cached_font(url, filename):
             print(f"error fetching font {filename}: {e}..!")
     threading.Thread(target=download_font, daemon=True).start()
     return font_path, None
-
 POPPINS_FONT_URL = "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
 poppins_path, poppins_data = get_cached_font(POPPINS_FONT_URL, "Poppins-Bold.ttf")
 if os.name == "nt" and poppins_path and os.path.exists(poppins_path):
@@ -223,7 +207,6 @@ if os.name == "nt" and fa_path and os.path.exists(fa_path):
     if res == 0:
         print("failed to load Font Awesome font..!")
 FA_FONT = ("Font Awesome 6 Free Solid", 24)
-
 _dummy_root = tk.Tk()
 _dummy_root.withdraw()
 ctk.set_appearance_mode("Dark")
@@ -234,8 +217,6 @@ root.configure(bg="#121212")
 root.state("zoomed")
 root.minsize(800, 600)
 root.protocol("WM_DELETE_WINDOW", lambda: root.withdraw())
-
-# Data tracking for keyboard events and words
 key_usage = {}
 key_press_duration = {}
 currently_pressed = {}
@@ -246,9 +227,7 @@ app_start_time = time.time()
 current_word = ""
 word_usage = defaultdict(int)
 word_daily_count = {}
-
 last_activity_time = time.time()
-
 all_curse_words_set = {"fuck", "fucker", "fucking", "fucked", "fuckface", "fuckhead", "fuckwit", "motherfucker", "motherfucking", "f u c k", "f.u.c.k", "f*ck", "f**k", "shit", "shitty", "shitter", "shithole", "bullshit", "crap", "damn", "dammit", "goddamn", "goddammit", "s hit", "s.h.i.t", "s#it", "bitch", "bitches", "bitching", "bastard", "bastards", "asshole", "assholes", "ass", "arse", "arsehole", "b i t c h", "b*tch", "b!tch", "dick", "dickhead", "dumbass", "dickweed", "dickwad", "d i c k", "cunt", "cunts", "cock", "cocks", "clit", "clits", "cum", "cummer", "cumming", "pussy", "pussies", "c u n t", "c*nt", "c!nt", "whore", "whores", "slut", "sluts"}
 racial_slurs_set = {"adolf", "hitler", "jew", "nigger", "niggers", "fag", "faggot", "faggots", "kike", "kikes", "chink", "chinks", "spic", "spics", "wetback", "wetbacks", "gook", "gooks", "kkk", "k.k.k"}
 curse_general_set = all_curse_words_set - racial_slurs_set
@@ -258,27 +237,52 @@ fastest_wpm = 0
 screen_time_data = {}
 app_usage = {}
 
-# Create main content frames
+# ===================== NEW: APP STREAKS DATA =====================
+# Global dictionaries for tracking app streaks
+# For each app title, we keep its current streak (number of consecutive days used)
+app_streaks = {}           # { app_title: streak (int) }
+apps_used_today = set()    # Set of app titles used on the current day
+apps_used_yesterday = set()  # Set of app titles used on the previous day
+last_streak_date = time.strftime("%Y-%m-%d")
+# ==================================================================
+
+# Main content container
 content_frame = ctk.CTkFrame(root, fg_color="#121212", corner_radius=10)
 content_frame.pack(expand=True, fill="both", padx=10, pady=10)
+
+# Main pages (frames)
 keyboard_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 statistics_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
-settings_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 recap_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 screen_time_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 mouse_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
 words_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+export_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+# NEW: Streaks Frame for app streaks – this page is now made scrollable.
+streaks_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
+
+# --- Begin streaks page scrollable area setup ---
+# Instead of adding widgets directly into streaks_frame, we embed a canvas with a scrollbar.
+streaks_canvas = tk.Canvas(streaks_frame, bg="#121212", highlightthickness=0)
+streaks_canvas.pack(side="left", fill="both", expand=True)
+streaks_scrollbar = ctk.CTkScrollbar(streaks_frame, orientation="vertical", command=streaks_canvas.yview)
+streaks_scrollbar.pack(side="right", fill="y")
+streaks_canvas.configure(yscrollcommand=streaks_scrollbar.set)
+streaks_inner_frame = ctk.CTkFrame(streaks_canvas, fg_color="#121212", corner_radius=10)
+streaks_canvas.create_window((0, 0), window=streaks_inner_frame, anchor="nw")
+def on_streaks_configure(event):
+    streaks_canvas.configure(scrollregion=streaks_canvas.bbox("all"))
+streaks_inner_frame.bind("<Configure>", on_streaks_configure)
+# --- End streaks page scrollable area setup ---
+
 current_screen = "Keyboard"
 performance_mode_active = False
 performance_mode_frame = None
-
-# Use slower update intervals to reduce UI lag.
 UI_UPDATE_INTERVAL = 1000
 SLOW_HARDWARE = True
 KEY_COUNTS_INTERVAL = UI_UPDATE_INTERVAL
 STATS_INTERVAL = UI_UPDATE_INTERVAL
 CAPSLOCK_INTERVAL = UI_UPDATE_INTERVAL
-
 maximized_fix_done = False
 def check_window_state():
     global maximized_fix_done
@@ -288,16 +292,13 @@ def check_window_state():
             maximized_fix_done = True
     safe_after(500, check_window_state)
 check_window_state()
-
 def on_closing():
     root.withdraw()
-
 def quit_app(icon, event):
     global app_running
     app_running = False
     icon.stop()
     os._exit(0)
-
 def normalize_key(key):
     if key is None:
         return None
@@ -311,12 +312,9 @@ def normalize_key(key):
     if len(key) == 1 and key.isalpha():
         return key.upper()
     return key
-
 sim_key_mapping = {"ESC": "esc", "Backspace": "backspace", "Enter": "enter", "Caps": "caps lock", "Shift": "shift", "Left Shift": "left shift", "Right Shift": "right shift", "CTRL": "ctrl", "Left Ctrl": "left ctrl", "Right Ctrl": "right ctrl", "Alt": "alt", "Left Alt": "left alt", "Right Alt": "right alt", "SPACE": "space", "Tab": "tab", "INSERT": "insert", "HOME": "home", "END": "end", "Delete": "delete", "PrtSc": "print screen", "Fn": "fn", "Win": "win", "↑": "up", "↓": "down", "←": "left", "→": "right"}
-
 def get_sim_key(key):
     return sim_key_mapping.get(key, key.lower() if len(key) == 1 else key.lower())
-
 class AestheticKey(ctk.CTkFrame):
     def __init__(self, master, text, width=60, height=60, norm_key=None, shadow_offset=4, **kwargs):
         super().__init__(master, width=width+shadow_offset, height=height+shadow_offset+20, fg_color="#121212", corner_radius=10, **kwargs)
@@ -413,13 +411,11 @@ class AestheticKey(ctk.CTkFrame):
                 print(f"error releasing {self.norm_key}: {e}..!")
         on_key_release(type("DummyEvent", (), {"keysym": self.norm_key, "from_ui": True}))
         self.on_release(event)
-
 def create_key(parent, key_label, width, height, norm_override=None):
     widget = AestheticKey(parent, text=key_label, width=width, height=height, norm_key=norm_override)
     if widget.norm_key is not None:
         keyboard_keys[widget.norm_key].append(widget)
     return widget
-
 main_keys_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 main_keys_frame.pack(pady=10)
 row_defs = [
@@ -440,7 +436,6 @@ for row in row_defs:
             key_label, key_w, key_h = item
             widget = create_key(row_frame, key_label, key_w, key_h)
         widget.pack(side="left", padx=4)
-        
 space_row_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 space_row_frame.pack(pady=10)
 space_keys = [("Fn", 60, 60), ("Ctrl", 60, 60, "Left Ctrl"), ("Win", 60, 60), ("Alt", 60, 60, "Left Alt"), ("Space", 300, 60), ("Alt", 60, 60, "Right Alt"), ("PrtSc", 60, 60), ("Ctrl", 60, 60, "Right Ctrl")]
@@ -452,7 +447,6 @@ for key_tuple in space_keys:
         key_label, key_w, key_h = key_tuple
         widget = create_key(space_row_frame, key_label, key_w, key_h)
     widget.grid(row=0, column=space_keys.index(key_tuple), padx=4, pady=4)
-    
 arrow_cluster_frame = ctk.CTkFrame(space_row_frame, width=60, height=60, fg_color="#121212", corner_radius=10)
 arrow_cluster_frame.grid(row=0, column=len(space_keys), padx=4, pady=4)
 up_key = create_key(arrow_cluster_frame, "↑", 30, 30)
@@ -463,13 +457,12 @@ down_key = create_key(arrow_cluster_frame, "↓", 30, 30)
 down_key.place(x=15, y=30)
 right_key = create_key(arrow_cluster_frame, "→", 30, 30)
 right_key.place(x=30, y=30)
-
 performance_mode_var = ctk.BooleanVar(value=False)
 def performance_mode_toggle():
     global performance_mode_active, performance_mode_frame
     if performance_mode_var.get():
         performance_mode_active = True
-        for frm in [keyboard_frame, statistics_frame, settings_frame, recap_frame, screen_time_frame, mouse_frame, words_frame]:
+        for frm in [keyboard_frame, statistics_frame, export_frame, recap_frame, screen_time_frame, mouse_frame, words_frame, streaks_frame]:
             frm.pack_forget()
         if performance_mode_frame is None:
             performance_mode_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
@@ -484,7 +477,6 @@ def performance_mode_toggle():
             performance_mode_frame.pack(expand=True, fill="both")
     else:
         performance_mode_disable()
-        
 def performance_mode_disable():
     global performance_mode_active, performance_mode_frame
     performance_mode_var.set(False)
@@ -495,8 +487,8 @@ def performance_mode_disable():
         keyboard_frame.pack(expand=True, fill="both")
     elif current_screen == "Statistics":
         statistics_frame.pack(expand=True, fill="both")
-    elif current_screen == "Settings":
-        settings_frame.pack(expand=True, fill="both")
+    elif current_screen == "Export":
+        export_frame.pack(expand=True, fill="both")
     elif current_screen == "Recap":
         recap_frame.pack(expand=True, fill="both")
     elif current_screen == "Screen Time":
@@ -505,13 +497,13 @@ def performance_mode_disable():
         mouse_frame.pack(expand=True, fill="both")
     elif current_screen == "Words":
         words_frame.pack(expand=True, fill="both")
-
+    elif current_screen == "Streaks":
+        streaks_frame.pack(expand=True, fill="both")
 key_press_duration_mode = ctk.BooleanVar(value=False)
 key_press_checkbox = ctk.CTkCheckBox(keyboard_frame, text="Key Presses", variable=key_press_duration_mode, font=("Poppins", 14), text_color="white", fg_color="#121212")
 key_press_checkbox.place(relx=0.0, rely=1.0, anchor="sw", x=10, y=-10)
 perf_checkbox = ctk.CTkCheckBox(keyboard_frame, text="Performance Mode", variable=performance_mode_var, font=("Poppins", 14), text_color="white", fg_color="#121212", command=performance_mode_toggle)
 perf_checkbox.place(relx=1.0, rely=1.0, anchor="se", x=-10, y=-10)
-
 stats_option_var = ctk.StringVar(value="Line Graph")
 stats_option_menu = ctk.CTkOptionMenu(statistics_frame, values=["Line Graph", "Plain Text"], variable=stats_option_var, font=CUSTOM_FONT)
 stats_option_menu.pack(pady=10)
@@ -523,7 +515,6 @@ plain_text_box = ctk.CTkTextbox(stats_content_frame, font=("Poppins", 12, "bold"
 plain_text_box.pack(expand=True, fill="both")
 plain_text_box.configure(state="disabled")
 plain_text_box.pack_forget()
-
 def update_plain_text():
     plain_text_box.configure(state="normal")
     plain_text_box.delete("1.0", "end")
@@ -534,7 +525,6 @@ def update_plain_text():
         else:
             plain_text_box.insert("end", f"{k}: {key_usage.get(k, 0)}\n")
     plain_text_box.configure(state="disabled")
-
 def draw_line_graph():
     graph_canvas.delete("all")
     current_time = time.time()
@@ -583,7 +573,6 @@ def draw_line_graph():
     for point in smoothed_points:
         coords.extend(point)
     graph_canvas.create_line(*coords, fill="cyan", width=2, smooth=True)
-
 def update_statistics_display():
     option = stats_option_var.get()
     if option == "Line Graph":
@@ -594,9 +583,8 @@ def update_statistics_display():
         graph_canvas.pack_forget()
         plain_text_box.pack(expand=True, fill="both")
         update_plain_text()
-    safe_after(STATS_INTERVAL, update_statistics_display)
+    safe_after(get_ui_delay(STATS_INTERVAL), update_statistics_display)
 update_statistics_display()
-
 def update_key_counts():
     show_duration = key_press_duration_mode.get()
     for key, widget_list in keyboard_keys.items():
@@ -608,9 +596,8 @@ def update_key_counts():
             display = str(count)
         for widget in widget_list:
             widget.count_label.configure(text=display)
-    safe_after(KEY_COUNTS_INTERVAL, update_key_counts)
+    safe_after(get_ui_delay(KEY_COUNTS_INTERVAL), update_key_counts)
 update_key_counts()
-
 def update_screen_time_loop():
     now = time.time()
     delta = now - update_screen_time_loop.last_check
@@ -633,6 +620,8 @@ def update_screen_time_loop():
             app_title = "Unknown"
         if app_title:
             app_usage[app_title] = app_usage.get(app_title, 0) + delta
+            # NEW: Also record that this app was used today (for streak tracking)
+            apps_used_today.add(app_title)
         refresh_rate = 1000
     else:
         screen_time_data[today]["afk"] += delta
@@ -640,6 +629,76 @@ def update_screen_time_loop():
     safe_after(refresh_rate, update_screen_time_loop)
 update_screen_time_loop.last_check = time.time()
 update_screen_time_loop()
+
+# =================== NEW: APP STREAKS LOGIC ===================
+def check_streak_day_change():
+    """
+    Every minute, check if the day has changed.
+    When a new day starts, update each app’s streak as follows:
+      - For each app that was used yesterday (i.e. in apps_used_yesterday), increment its streak.
+      - For any app not used yesterday, reset its streak to 0.
+    Then, set apps_used_yesterday = copy of apps_used_today and clear apps_used_today.
+    """
+    global last_streak_date, apps_used_today, apps_used_yesterday, app_streaks
+    current_date = time.strftime("%Y-%m-%d")
+    if current_date != last_streak_date:
+        all_apps = set(list(app_streaks.keys())) | apps_used_yesterday
+        for app in all_apps:
+            if app in apps_used_yesterday:
+                app_streaks[app] = app_streaks.get(app, 0) + 1
+            else:
+                app_streaks[app] = 0
+        apps_used_yesterday = apps_used_today.copy()
+        apps_used_today.clear()
+        last_streak_date = current_date
+    safe_after(60000, check_streak_day_change)
+check_streak_day_change()
+
+def update_streaks_ui():
+    """
+    Refresh the Streaks page.
+    Apps with an active streak (streak ≥ 2) are listed first (sorted descending by streak),
+    while others appear afterwards (sorted alphabetically). For apps with a streak < 2,
+    the fire icon and streak count are displayed in gray.
+    
+    This function now works on the inner scrollable frame and preserves the current
+    vertical scroll position to avoid the page “jumping” to the top.
+    """
+    # Save the current scroll position (if any)
+    try:
+        current_y = streaks_canvas.yview()[0]
+    except Exception:
+        current_y = 0
+    for widget in streaks_inner_frame.winfo_children():
+         widget.destroy()
+    title = ctk.CTkLabel(streaks_inner_frame, text="App Streaks", font=("Poppins", 28, "bold"), text_color="white", fg_color="#121212")
+    title.pack(pady=(20,10))
+    all_apps = set(app_usage.keys()) | set(app_streaks.keys())
+    if not all_apps:
+         label = ctk.CTkLabel(streaks_inner_frame, text="No apps tracked yet", font=("Poppins", 16), text_color="#808080", fg_color="#121212")
+         label.pack(pady=5, padx=20, anchor="w")
+    else:
+         active_apps = [app for app in all_apps if app_streaks.get(app, 0) >= 2]
+         inactive_apps = [app for app in all_apps if app_streaks.get(app, 0) < 2]
+         active_apps.sort(key=lambda x: app_streaks.get(x,0), reverse=True)
+         inactive_apps.sort()
+         for app in active_apps + inactive_apps:
+             streak = app_streaks.get(app, 0)
+             if streak >= 2:
+                  text_color = "#FFA500"
+                  fire_icon = "🔥"
+             else:
+                  text_color = "#808080"
+                  fire_icon = "🔥"
+             display_text = f"{app}: {streak} day streak {fire_icon}"
+             label = ctk.CTkLabel(streaks_inner_frame, text=display_text, font=("Poppins", 16), text_color=text_color, fg_color="#121212")
+             label.pack(pady=5, padx=20, anchor="w")
+    streaks_inner_frame.update_idletasks()
+    streaks_canvas.configure(scrollregion=streaks_canvas.bbox("all"))
+    streaks_canvas.yview_moveto(current_y)
+    safe_after(get_ui_delay(2000), update_streaks_ui)
+update_streaks_ui()
+# =============================================================
 
 def update_screen_time_ui():
     today = time.strftime("%Y-%m-%d")
@@ -660,8 +719,7 @@ def update_screen_time_ui():
             count += 1
     avg = total / count if count else 0
     lbl_avg.configure(text=seconds_to_hms(avg))
-    safe_after(1000, update_screen_time_ui)
-    
+    safe_after(get_ui_delay(1000), update_screen_time_ui)
 lbl_active = None
 lbl_app = None
 lbl_avg = None
@@ -681,12 +739,10 @@ def create_stat_card(parent, icon, title, value="Calculating..."):
     value_label.grid(row=1, column=1, sticky="w", pady=(0,20))
     card.columnconfigure(1, weight=1)
     return card, value_label
-
 active_card, lbl_active = create_stat_card(cards_container, "⏱", "Today's Active Time")
 app_card, lbl_app = create_stat_card(cards_container, "💻", "Most Used App Today")
 avg_card, lbl_avg = create_stat_card(cards_container, "📊", "Average Active Time (Past 7 Days)")
 update_screen_time_ui()
-
 weekly_graph_label = ctk.CTkLabel(screen_time_frame, text="Weekly Screen Time", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
 weekly_graph_label.pack(pady=(20,10))
 weekly_graph_frame = ctk.CTkFrame(screen_time_frame, fg_color="#121212", corner_radius=10)
@@ -722,9 +778,8 @@ def update_weekly_bars():
         weekly_canvas.create_text(x0 + bar_width / 2, 210, text=weekday_full, fill="white", font=("Poppins", 10))
         time_label = seconds_to_hms(active)
         weekly_canvas.create_text(x0 + bar_width / 2, y0 - 10, text=time_label, fill="white", font=("Poppins", 10))
-    safe_after(1000, update_weekly_bars)
+    safe_after(get_ui_delay(1000), update_weekly_bars)
 update_weekly_bars()
-
 mouse_title = ctk.CTkLabel(mouse_frame, text="🖱 Mouse", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 mouse_title.pack(pady=(20,10))
 mouse_scroll_canvas = tk.Canvas(mouse_frame, bg="#121212", highlightthickness=0)
@@ -751,7 +806,7 @@ def update_mouse_ui():
     lbl_middle.configure(text=str(MouseStats.middle_clicks))
     lbl_scroll.configure(text=str(MouseStats.scroll_count))
     lbl_distance.configure(text=f"{int(MouseStats.total_distance)} px")
-    safe_after(1000, update_mouse_ui)
+    safe_after(get_ui_delay(1000), update_mouse_ui)
 update_mouse_ui()
 mouse_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Clicks", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
 mouse_graph_label.pack(pady=(20,10))
@@ -792,9 +847,8 @@ def update_mouse_line_graph():
         for p in points:
             coords.extend(p)
         mouse_canvas.create_line(*coords, fill="cyan", width=2, smooth=True)
-    safe_after(1000, update_mouse_line_graph)
+    safe_after(get_ui_delay(1000), update_mouse_line_graph)
 update_mouse_line_graph()
-
 distance_graph_label = ctk.CTkLabel(mouse_frame, text="Weekly Total Distance Moved", font=("Poppins", 24, "bold"), text_color="#FFFFFF", fg_color="#121212")
 distance_graph_label.pack(pady=(20,10))
 distance_graph_frame = ctk.CTkFrame(mouse_frame, fg_color="#121212", corner_radius=10)
@@ -829,9 +883,8 @@ def update_mouse_distance_graph():
         weekday_full = day.strftime("%A")
         distance_canvas.create_text(x0 + bar_width / 2, 210, text=weekday_full, fill="white", font=("Poppins", 10))
         distance_canvas.create_text(x0 + bar_width / 2, y0 - 10, text=f"{int(distance)} px", fill="white", font=("Poppins", 10))
-    safe_after(1000, update_mouse_distance_graph)
+    safe_after(get_ui_delay(1000), update_mouse_distance_graph)
 update_mouse_distance_graph()
-
 def download_heatmap_data():
     if pyautogui is None or Image is None:
         print("Required libraries for heatmap (pyautogui and Pillow) are not installed.")
@@ -855,10 +908,8 @@ def download_heatmap_data():
         print(f"Heatmap saved to {filename}")
     except Exception as e:
         print(f"Error saving heatmap: {e}")
-
 download_heatmap_button = ctk.CTkButton(mouse_frame, text="Download Heatmap", font=("Poppins", 16), command=download_heatmap_data)
 download_heatmap_button.pack(pady=10)
-
 words_title = ctk.CTkLabel(words_frame, text="✏️ Words", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
 words_title.pack(pady=(20,10))
 words_textbox = ctk.CTkTextbox(words_frame, font=("Poppins", 14, "bold"), fg_color="#121212", text_color="#FFFFFF", height=200)
@@ -914,22 +965,22 @@ def update_words_ui():
     else:
         words_canvas.delete("all")
         words_canvas.create_text(200, 125, text="Graph requires 7 days of data", fill="white", font=("Poppins", 16, "bold"))
-    safe_after(1000, update_words_ui)
+    safe_after(get_ui_delay(1000), update_words_ui)
 update_words_ui()
-
 def switch_screen(screen):
     global current_screen
     current_screen = screen
     if performance_mode_active:
         return
-    for frm in [keyboard_frame, statistics_frame, settings_frame, recap_frame, screen_time_frame, mouse_frame, words_frame]:
+    # Hide all pages first
+    for frm in [keyboard_frame, statistics_frame, export_frame, recap_frame, screen_time_frame, mouse_frame, words_frame, streaks_frame]:
         frm.pack_forget()
     if screen == "Keyboard":
         keyboard_frame.pack(expand=True, fill="both")
     elif screen == "Statistics":
         statistics_frame.pack(expand=True, fill="both")
-    elif screen == "Settings":
-        settings_frame.pack(expand=True, fill="both")
+    elif screen == "Export":
+        export_frame.pack(expand=True, fill="both")
     elif screen == "Recap":
         recap_frame.pack(expand=True, fill="both")
     elif screen == "Screen Time":
@@ -938,7 +989,8 @@ def switch_screen(screen):
         mouse_frame.pack(expand=True, fill="both")
     elif screen == "Words":
         words_frame.pack(expand=True, fill="both")
-
+    elif screen == "Streaks":
+        streaks_frame.pack(expand=True, fill="both")
 sidebar_width = 300
 sidebar_height = 500
 sidebar_y = 10
@@ -951,8 +1003,8 @@ btn_keyboard = ctk.CTkButton(sidebar_panel, text="Keyboard", command=lambda: [sw
 btn_keyboard.pack(pady=12, padx=20, fill="x")
 btn_statistics = ctk.CTkButton(sidebar_panel, text="Statistics", command=lambda: [switch_screen("Statistics"), animate_sidebar_close()], **btn_params)
 btn_statistics.pack(pady=12, padx=20, fill="x")
-btn_settings = ctk.CTkButton(sidebar_panel, text="Settings", command=lambda: [switch_screen("Settings"), animate_sidebar_close()], **btn_params)
-btn_settings.pack(pady=12, padx=20, fill="x")
+btn_export = ctk.CTkButton(sidebar_panel, text="Export", command=lambda: [switch_screen("Export"), animate_sidebar_close()], **btn_params)
+btn_export.pack(pady=12, padx=20, fill="x")
 btn_recap = ctk.CTkButton(sidebar_panel, text="Recap", command=lambda: [switch_screen("Recap"), animate_sidebar_close()], **btn_params)
 btn_recap.pack(pady=12, padx=20, fill="x")
 btn_screen_time = ctk.CTkButton(sidebar_panel, text="Screen Time", command=lambda: [switch_screen("Screen Time"), animate_sidebar_close()], **btn_params)
@@ -961,6 +1013,8 @@ btn_mouse = ctk.CTkButton(sidebar_panel, text="Mouse", command=lambda: [switch_s
 btn_mouse.pack(pady=12, padx=20, fill="x")
 btn_words = ctk.CTkButton(sidebar_panel, text="Words", command=lambda: [switch_screen("Words"), animate_sidebar_close()], **btn_params)
 btn_words.pack(pady=12, padx=20, fill="x")
+btn_streaks = ctk.CTkButton(sidebar_panel, text="Streaks", command=lambda: [switch_screen("Streaks"), animate_sidebar_close()], **btn_params)
+btn_streaks.pack(pady=12, padx=20, fill="x")
 def animate_sidebar_open():
     global sidebar_current_x
     target_x = 0
@@ -1178,7 +1232,7 @@ def update_capslock_indicator():
     state = get_capslock_state()
     for widget in keyboard_keys.get("Caps", []):
         widget.set_capslock_state(state)
-    safe_after(CAPSLOCK_INTERVAL, update_capslock_indicator)
+    safe_after(get_ui_delay(CAPSLOCK_INTERVAL), update_capslock_indicator)
 update_capslock_indicator()
 recap_title = ctk.CTkLabel(recap_frame, text="Recap", font=("Poppins", 24, "bold"), text_color="white", fg_color="#121212")
 recap_title.pack(pady=20)
@@ -1249,11 +1303,8 @@ def update_recap():
     least_used_char_label.configure(text=f"Least Used Character: {least_used_char} ({char_usage.get(least_used_char,0)})")
     curse_general_label.configure(text=f"General Curse Words Typed: {curse_general_count}")
     racial_slurs_label.configure(text=f"Racial Slurs Typed: {racial_slurs_count}")
-    safe_after(1000, update_recap)
+    safe_after(get_ui_delay(1000), update_recap)
 update_recap()
-
-# ---------------- Database Read/Write Functions ----------------
-
 def save_data():
     data = {
         "timestamp": time.time(),
@@ -1276,16 +1327,20 @@ def save_data():
         "app_usage": app_usage,
         "fastest_wpm": fastest_wpm,
         "current_word": current_word,
-        "key_press_duration": key_press_duration
+        "key_press_duration": key_press_duration,
+        # NEW: Save streak data
+        "app_streaks": app_streaks,
+        "apps_used_today": list(apps_used_today),
+        "apps_used_yesterday": list(apps_used_yesterday),
+        "last_streak_date": last_streak_date
     }
     threading.Thread(target=write_to_db, args=(data,), daemon=True).start()
-
 def periodic_data_update():
     save_data()
     safe_after(60000, periodic_data_update)
-
 def load_data():
     global key_usage, total_key_count, word_usage, word_daily_count, curse_general_count, racial_slurs_count, app_start_time, screen_time_data, mouse_data, mouse_click_positions, mouse_movements, app_usage, fastest_wpm, current_word, key_press_duration
+    global app_streaks, apps_used_today, apps_used_yesterday, last_streak_date
     data = load_from_db()
     if data:
         key_usage = data.get("key_usage", {})
@@ -1308,21 +1363,74 @@ def load_data():
         fastest_wpm = data.get("fastest_wpm", 0)
         current_word = data.get("current_word", "")
         key_press_duration.update(data.get("key_press_duration", {}))
+        # NEW: Load streak data
+        app_streaks = data.get("app_streaks", {})
+        apps_used_today = set(data.get("apps_used_today", []))
+        apps_used_yesterday = set(data.get("apps_used_yesterday", []))
+        last_streak_date = data.get("last_streak_date", time.strftime("%Y-%m-%d"))
     else:
         save_data()
-
 load_data()
 periodic_data_update()
-# ---------------- End Database Read/Write Functions ----------------
 
-settings_title = ctk.CTkLabel(settings_frame, text="Settings", font=("Poppins", 28, "bold"), text_color="#FFFFFF", fg_color="#121212")
-settings_title.pack(pady=(20,10))
-appearance_mode_var = ctk.StringVar(value="Dark")
-def change_appearance():
-    mode = appearance_mode_var.get()
-    ctk.set_appearance_mode(mode)
-appearance_mode_menu = ctk.CTkOptionMenu(settings_frame, values=["Dark", "Light", "System"], variable=appearance_mode_var, font=("Poppins", 16), command=lambda x: change_appearance())
-appearance_mode_menu.pack(pady=10)
+# ===============================================================
+# New Export Page (moved from sidebar to a dedicated page)
+export_label_page = ctk.CTkLabel(export_frame, text="Export Data", font=("Poppins", 28, "bold"), text_color="white", fg_color="#121212")
+export_label_page.pack(pady=(20,10))
+export_format_var_page = ctk.StringVar(value="JSON")
+export_format_menu_page = ctk.CTkOptionMenu(export_frame, values=["JSON", "TXT"], variable=export_format_var_page, font=("Poppins", 14))
+export_format_menu_page.pack(pady=5, padx=20, fill="x")
+export_status_label_page = ctk.CTkLabel(export_frame, text="", font=("Poppins", 12), fg_color="#121212", text_color="white")
+export_status_label_page.pack(pady=5, padx=20, fill="x")
+def export_data():
+    export_status_label_page.configure(text="Exporting...")
+    fmt = export_format_var_page.get()
+    def do_export():
+        data = {
+            "timestamp": time.time(),
+            "key_usage": key_usage,
+            "total_key_count": total_key_count,
+            "word_usage": dict(word_usage),
+            "word_daily_count": word_daily_count,
+            "curse_general_count": curse_general_count,
+            "racial_slurs_count": racial_slurs_count,
+            "app_start_time": app_start_time,
+            "screen_time_data": screen_time_data,
+            "mouse_left_clicks": MouseStats.left_clicks,
+            "mouse_right_clicks": MouseStats.right_clicks,
+            "mouse_middle_clicks": MouseStats.middle_clicks,
+            "mouse_scroll_count": MouseStats.scroll_count,
+            "mouse_total_distance": MouseStats.total_distance,
+            "mouse_data": mouse_data,
+            "mouse_click_positions": mouse_click_positions,
+            "mouse_movements": mouse_movements,
+            "app_usage": app_usage,
+            "fastest_wpm": fastest_wpm,
+            "current_word": current_word,
+            "key_press_duration": key_press_duration,
+            "app_streaks": app_streaks,
+            "apps_used_today": list(apps_used_today),
+            "apps_used_yesterday": list(apps_used_yesterday),
+            "last_streak_date": last_streak_date
+        }
+        downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        if fmt == "JSON":
+            filename = os.path.join(downloads_dir, f"export_{timestamp_str}.json")
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4)
+        elif fmt == "TXT":
+            filename = os.path.join(downloads_dir, f"export_{timestamp_str}.txt")
+            with open(filename, "w", encoding="utf-8") as f:
+                for key, value in data.items():
+                    f.write(f"{key}: {value}\n")
+        root.after(0, lambda: export_status_label_page.configure(text="Export Complete"))
+    threading.Thread(target=do_export, daemon=True).start()
+export_button_page = ctk.CTkButton(export_frame, text="Export", font=("Poppins", 18, "bold"), fg_color="#3E4A59", hover_color="#5A6775", corner_radius=10, command=export_data)
+export_button_page.pack(pady=12, padx=20, fill="x")
+# ===============================================================
+
+# Start with the Keyboard screen
 switch_screen("Keyboard")
 def show_window(icon, event):
     if app_running and root.winfo_exists():
