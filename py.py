@@ -25,6 +25,7 @@ import pystray
 DATA_DIR = os.path.join(os.getcwd(), "data")
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
+SCREEN_TIME_FILE = os.path.join(DATA_DIR, "screentime.json")
 CATEGORIES = ["keyboard", "mouse", "screentime", "words", "streaks", "misc"]
 current_file_index = {cat: 0 for cat in CATEGORIES}
 SIZE_LIMIT = 1 * 1024 * 1024
@@ -89,7 +90,6 @@ def backup_data_folder():
 def periodic_backup():
     backup_data_folder()
     safe_after(3600000, periodic_backup)
-
 def sigint_handler(sig, frame):
     global app_running
     app_running = False
@@ -99,7 +99,6 @@ def sigint_handler(sig, frame):
         pass
     sys.exit(0)
 signal.signal(signal.SIGINT, sigint_handler)
-
 mouse_data = {}
 mouse_click_positions = {"left": [], "right": [], "middle": []}
 mouse_movements = []
@@ -155,7 +154,6 @@ def handle_mouse_event(event):
         MouseStats.scroll_count += delta_val
         update_mouse_data("scroll", delta_val)
 mouse.hook(handle_mouse_event)
-
 def seconds_to_hms(seconds):
     seconds = int(seconds)
     h = seconds // 3600
@@ -235,7 +233,6 @@ root.configure(bg="#121212")
 root.state("zoomed")
 root.minsize(800, 600)
 root.protocol("WM_DELETE_WINDOW", lambda: root.withdraw())
-
 key_usage = {}
 key_press_duration = {}
 currently_pressed = {}
@@ -305,7 +302,6 @@ def compute_longest_session():
         prev = t
     longest = max(longest, current)
     return longest
-
 content_frame = ctk.CTkFrame(root, fg_color="#121212", corner_radius=10)
 content_frame.pack(expand=True, fill="both", padx=10, pady=10)
 keyboard_frame = ctk.CTkFrame(content_frame, fg_color="#121212", corner_radius=10)
@@ -334,16 +330,13 @@ def check_window_state():
             maximized_fix_done = True
     safe_after(500, check_window_state)
 check_window_state()
-
 def on_closing():
     root.withdraw()
-
 def quit_app(icon, event):
     global app_running
     app_running = False
     icon.stop()
     os._exit(0)
-
 def normalize_key(key):
     if key is None:
         return None
@@ -357,11 +350,9 @@ def normalize_key(key):
     if len(key) == 1 and key.isalpha():
         return key.upper()
     return key
-
 sim_key_mapping = {"ESC": "esc", "Backspace": "backspace", "Enter": "enter", "Caps": "caps lock", "Shift": "shift", "Left Shift": "left shift", "Right Shift": "right shift", "CTRL": "ctrl", "Left Ctrl": "left ctrl", "Right Ctrl": "right ctrl", "Alt": "alt", "Left Alt": "left alt", "Right Alt": "right alt", "SPACE": "space", "Tab": "tab", "INSERT": "insert", "HOME": "home", "END": "end", "Delete": "delete", "PrtSc": "print screen", "Fn": "fn", "Win": "win", "↑": "up", "↓": "down", "←": "left", "→": "right"}
 def get_sim_key(key):
     return sim_key_mapping.get(key, key.lower() if len(key) == 1 else key.lower())
-
 class AestheticKey(ctk.CTkFrame):
     def __init__(self, master, text, width=60, height=60, norm_key=None, shadow_offset=4, **kwargs):
         super().__init__(master, width=width+shadow_offset, height=height+shadow_offset+20, fg_color="#121212", corner_radius=10, **kwargs)
@@ -463,7 +454,6 @@ def create_key(parent, key_label, width, height, norm_override=None):
     if widget.norm_key is not None:
         keyboard_keys[widget.norm_key].append(widget)
     return widget
-
 main_keys_frame = ctk.CTkFrame(keyboard_frame, fg_color="#121212", corner_radius=10)
 main_keys_frame.pack(pady=10)
 row_defs = [
@@ -505,7 +495,6 @@ down_key = create_key(arrow_cluster_frame, "↓", 30, 30)
 down_key.place(x=15, y=30)
 right_key = create_key(arrow_cluster_frame, "→", 30, 30)
 right_key.place(x=30, y=30)
-
 performance_mode_var = ctk.BooleanVar(value=False)
 def performance_mode_toggle():
     global performance_mode_active, performance_mode_frame
@@ -1385,6 +1374,26 @@ def save_data():
 def periodic_data_update():
     save_data()
     safe_after(60000, periodic_data_update)
+def load_screen_time_file():
+    global screen_time_data, app_usage
+    try:
+        with open(SCREEN_TIME_FILE, "r") as f:
+            data = json.load(f)
+        screen_time_data = data.get("screen_time_data", {})
+        app_usage = data.get("app_usage", {})
+    except Exception:
+        screen_time_data = {}
+        app_usage = {}
+def save_screen_time_file():
+    data = {"screen_time_data": screen_time_data, "app_usage": app_usage}
+    try:
+        with open(SCREEN_TIME_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print("Error saving screen time file:", e)
+def periodic_screen_time_save():
+    save_screen_time_file()
+    safe_after(60000, periodic_screen_time_save)
 def load_data():
     global key_usage, total_key_count, key_press_duration
     global mouse_data, mouse_click_positions, mouse_movements
@@ -1407,10 +1416,6 @@ def load_data():
         MouseStats.middle_clicks = md.get("mouse_middle_clicks", 0)
         MouseStats.scroll_count = md.get("mouse_scroll_count", 0)
         MouseStats.total_distance = md.get("mouse_total_distance", 0.0)
-    st = load_latest_record("screentime")
-    if st:
-        screen_time_data.update(st.get("screen_time_data", {}))
-        app_usage.update(st.get("app_usage", {}))
     wd = load_latest_record("words")
     if wd:
         word_usage.update(wd.get("word_usage", {}))
@@ -1430,8 +1435,10 @@ def load_data():
         app_start_time = misc.get("app_start_time", app_start_time)
     else:
         save_data()
+    load_screen_time_file()
 load_data()
 periodic_data_update()
+periodic_screen_time_save()
 periodic_backup()
 export_label_page = ctk.CTkLabel(export_frame, text="Export Data", font=("Poppins", 28, "bold"), text_color="white", fg_color="#121212")
 export_label_page.pack(pady=(20,10))
@@ -1494,21 +1501,17 @@ def export_data():
 export_button_page = ctk.CTkButton(export_frame, text="Export", font=("Poppins", 18, "bold"), fg_color="#3E4A59", hover_color="#5A6775", corner_radius=10, command=export_data)
 export_button_page.pack(pady=12, padx=20, fill="x")
 switch_screen("Keyboard")
-
 def show_window(icon, event):
     if app_running and root.winfo_exists():
         root.deiconify()
         root.state("zoomed")
-
 def open_window_tray(icon, item):
     show_window(icon, None)
-
 def create_image():
     width = 64
     height = 64
     image = Image.new("RGB", (width, height), "gray")
     return image
-
 tray_menu = pystray.Menu(
     pystray.MenuItem("Open", open_window_tray),
     pystray.MenuItem("Quit", quit_app)
@@ -1516,7 +1519,6 @@ tray_menu = pystray.Menu(
 tray_icon = pystray.Icon("OptimizedKeyboardUI", create_image(), "Optimized Keyboard UI", tray_menu)
 tray_icon.on_clicked = show_window
 threading.Thread(target=tray_icon.run, daemon=True).start()
-
 try:
     root.mainloop()
 except KeyboardInterrupt:
